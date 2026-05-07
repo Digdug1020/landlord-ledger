@@ -33,23 +33,31 @@ export default async function handler(req, res) {
 
       if (r.end_date && dateStr > r.end_date) break;
 
-      const query = supabase
-        .from('transactions')
-        .select('id')
-        .eq('business_id', business_id)
-        .eq('transaction_date', dateStr)
-        .eq('description', r.description)
-        .eq('source', 'recurring');
-
+      // Check for duplicates - handle null property_id separately
+      let existingQuery;
       if (r.property_id) {
-        query.eq('property_id', r.property_id);
+        const { data } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('business_id', business_id)
+          .eq('property_id', r.property_id)
+          .eq('transaction_date', dateStr)
+          .eq('description', r.description)
+          .eq('source', 'recurring');
+        existingQuery = data;
       } else {
-        query.is('property_id', null);
+        const { data } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('business_id', business_id)
+          .is('property_id', null)
+          .eq('transaction_date', dateStr)
+          .eq('description', r.description)
+          .eq('source', 'recurring');
+        existingQuery = data;
       }
 
-      const { data: existing } = await query;
-
-      if (!existing || existing.length === 0) {
+      if (!existingQuery || existingQuery.length === 0) {
         await supabase.from('transactions').insert([{
           business_id: business_id,
           property_id: r.property_id || null,
@@ -63,6 +71,7 @@ export default async function handler(req, res) {
         posted++;
       }
 
+      // Advance to next occurrence
       const next = new Date(dueDate);
       if (r.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
       else if (r.frequency === 'weekly') next.setDate(next.getDate() + 7);
@@ -70,6 +79,7 @@ export default async function handler(req, res) {
       dueDate = next;
     }
 
+    // Update next_due_date to next future date
     await supabase.from('recurring_transactions')
       .update({ next_due_date: dueDate.toISOString().slice(0, 10) })
       .eq('id', r.id);
