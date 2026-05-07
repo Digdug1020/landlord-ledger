@@ -347,6 +347,9 @@ export default function App() {
   const [generalNoteSaving, setGeneralNoteSaving] = useState(false);
   const [propertyNotes, setPropertyNotes] = useState({});
 
+  // Subscription state
+  const [subscription, setSubscription] = useState({ status: "free" });
+
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
     background: "#1e2235", border: "1px solid #2d3555",
@@ -395,6 +398,19 @@ export default function App() {
         notesData.filter(n => n.property_id).forEach(n => { propNotes[n.property_id] = { id: n.id, content: n.content || "" }; });
         setPropertyNotes(propNotes);
       }
+
+      // Load subscription
+      const { data: subData } = await supabase.from("subscriptions").select("*").eq("business_id", bizData.id).single();
+      if (subData) setSubscription(subData);
+
+      // Handle successful Stripe checkout redirect
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("success") === "true") {
+        await supabase.from("subscriptions").upsert([{ business_id: bizData.id, status: "pro" }], { onConflict: "business_id" });
+        setSubscription({ status: "pro" });
+        window.history.replaceState({}, "", "/");
+      }
+
       setDataLoading(false);
 
       // Auto backfill
@@ -512,6 +528,7 @@ export default function App() {
     { id: "notes", label: "Notes" },
     { id: "properties", label: "Properties" },
     { id: "tax report", label: "Tax Report" },
+    { id: "billing", label: "⭐ Pro" },
   ];
 
   const typeColor = (type) => {
@@ -1098,6 +1115,75 @@ export default function App() {
                     );
                   })}
                 </div>
+              </>
+            )}
+
+            {/* BILLING */}
+            {activeTab === "billing" && (
+              <>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 20 }}>SUBSCRIPTION & BILLING</div>
+
+                {subscription.status === "pro" ? (
+                  <div style={{ background: "#0f1117", border: "1px solid #14532d", borderRadius: 16, padding: 28, textAlign: "center" }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>⭐</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80", marginBottom: 8 }}>You're on Pro!</div>
+                    <div style={{ fontSize: 14, color: "#94a3b8" }}>All features unlocked. Thank you for supporting LandlordLedger!</div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Free tier */}
+                    <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 16, padding: 24, marginBottom: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>Free</div>
+                        <div style={{ fontSize: 22, fontWeight: 700, color: "#e2e8f0" }}>$0</div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {["Up to 2 properties", "Manual transactions", "Basic dashboard"].map(f => (
+                          <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#94a3b8" }}>
+                            <span style={{ color: "#4ade80" }}>✓</span> {f}
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 16, padding: "10px 0", borderRadius: 10, background: "#1e2235", textAlign: "center", fontSize: 14, color: "#94a3b8" }}>
+                        Current plan
+                      </div>
+                    </div>
+
+                    {/* Pro tier */}
+                    <div style={{ background: "#0f1117", border: "2px solid #3b82f6", borderRadius: 16, padding: 24, position: "relative" }}>
+                      <div style={{ position: "absolute", top: -12, left: 24, background: "#3b82f6", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 12px", borderRadius: 20, fontFamily: "'Courier New', monospace" }}>RECOMMENDED</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>Pro</div>
+                        <div>
+                          <span style={{ fontSize: 22, fontWeight: 700, color: "#e2e8f0" }}>$19</span>
+                          <span style={{ fontSize: 13, color: "#94a3b8" }}>/mo</span>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                        {["Unlimited properties", "Recurring transactions", "Monthly P&L charts", "Tax reports", "Notes & Google Calendar", "Email alerts", "Priority support"].map(f => (
+                          <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#cbd5e1" }}>
+                            <span style={{ color: "#4ade80" }}>✓</span> {f}
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={async () => {
+                        const res = await fetch("/api/create-checkout", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ user_email: session.user.email, business_id: business.id })
+                        });
+                        const data = await res.json();
+                        if (data.url) window.location.href = data.url;
+                        else alert("Error starting checkout. Try again.");
+                      }} style={{
+                        width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
+                        background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 700
+                      }}>
+                        Upgrade to Pro →
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </>
