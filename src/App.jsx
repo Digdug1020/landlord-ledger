@@ -166,7 +166,7 @@ function LoginScreen() {
           {success && <div style={{ marginTop: 12, color: "#4ade80", fontSize: 13 }}>{success}</div>}
         </div>
         <div style={{ fontSize: 12, color: "#475569", marginTop: 24 }}>
-          By signing in you agree to our Terms of Service and Privacy Policy.
+          By signing in you agree to our <a href="/terms.html" style={{ color: "#3b82f6" }}>Terms of Service</a> and <a href="/privacy.html" style={{ color: "#3b82f6" }}>Privacy Policy</a>.
         </div>
       </div>
     </div>
