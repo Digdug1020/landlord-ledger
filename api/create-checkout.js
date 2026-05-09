@@ -6,9 +6,10 @@ module.exports = async function handler(req, res) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   const { user_email, business_id, plan } = req.body;
 
-  const priceId = plan === "annual" 
-    ? process.env.REACT_APP_STRIPE_PRICE_ID_ANNUAL 
-    : process.env.REACT_APP_STRIPE_PRICE_ID_MONTHLY;
+  const monthlyPrice = process.env.STRIPE_PRICE_MONTHLY || process.env.REACT_APP_STRIPE_PRICE_ID_MONTHLY;
+  const annualPrice = process.env.STRIPE_PRICE_ANNUAL || process.env.REACT_APP_STRIPE_PRICE_ID_ANNUAL;
+
+  const priceId = plan === "annual" ? annualPrice : monthlyPrice;
 
   try {
     const session = await stripe.checkout.sessions.create({
