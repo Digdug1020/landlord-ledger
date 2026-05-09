@@ -548,6 +548,54 @@ export default function App() {
 
   if (needsOnboarding) return <OnboardingScreen session={session} onComplete={() => { setNeedsOnboarding(false); setDataLoading(true); window.location.reload(); }} />;
 
+  // Paywall check — trial expired and not subscribed
+  const trialEnd = business?.trial_ends_at ? new Date(business.trial_ends_at) : null;
+  const trialExpired = trialEnd && trialEnd < new Date();
+  const isPro = subscription.status === "pro";
+
+  if (!dataLoading && trialExpired && !isPro) return (
+    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+        <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", marginBottom: 4, fontFamily: "Georgia, serif" }}>
+          Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
+        </div>
+        <div style={{ background: "#0f1117", border: "1px solid #f87171", borderRadius: 16, padding: 32, marginTop: 32 }}>
+          <div style={{ fontSize: 24, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#f87171", marginBottom: 8 }}>Your free trial has ended</div>
+          <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 28 }}>Subscribe to keep access to your properties, transactions, and reports. Your data is safe and waiting for you.</div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <button onClick={async () => {
+              const res = await fetch("/api/create-checkout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "monthly" })
+              });
+              const data = await res.json();
+              if (data.url) window.location.href = data.url;
+            }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "1px solid #2d3555", background: "#1e2235", color: "#e2e8f0", fontSize: 16, cursor: "pointer", fontWeight: 600 }}>
+              Monthly — $12/mo
+            </button>
+            <button onClick={async () => {
+              const res = await fetch("/api/create-checkout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "annual" })
+              });
+              const data = await res.json();
+              if (data.url) window.location.href = data.url;
+            }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
+              Annual — $99/year 🏆 Best Value
+            </button>
+          </div>
+          <button onClick={() => supabase.auth.signOut()} style={{ marginTop: 20, background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: 13 }}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#080b12", color: "#e2e8f0", fontFamily: "Georgia, serif", overflowX: "hidden" }}>
       <style>{`
