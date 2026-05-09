@@ -400,7 +400,7 @@ export default function App() {
       }
 
       // Load subscription
-      const { data: subData } = await supabase.from("subscriptions").select("*").eq("business_id", bizData.id).single();
+      const { data: subData } = await supabase.from("subscriptions").select("*").eq("business_id", bizData.id).maybeSingle();
       if (subData) setSubscription(subData);
 
       // Handle successful Stripe checkout redirect
