@@ -566,24 +566,30 @@ export default function App() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <button onClick={async () => {
-              const res = await fetch("/api/create-checkout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "monthly" })
-              });
-              const data = await res.json();
-              if (data.url) window.location.href = data.url;
+              try {
+                const res = await fetch("/api/create-checkout", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "monthly" })
+                });
+                const data = await res.json();
+                if (data.url) window.location.href = data.url;
+                else alert("Error: " + (data.error || "Unknown error"));
+              } catch(e) { alert("Error: " + e.message); }
             }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "1px solid #2d3555", background: "#1e2235", color: "#e2e8f0", fontSize: 16, cursor: "pointer", fontWeight: 600 }}>
               Monthly — $12/mo
             </button>
             <button onClick={async () => {
-              const res = await fetch("/api/create-checkout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "annual" })
-              });
-              const data = await res.json();
-              if (data.url) window.location.href = data.url;
+              try {
+                const res = await fetch("/api/create-checkout", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "annual" })
+                });
+                const data = await res.json();
+                if (data.url) window.location.href = data.url;
+                else alert("Error: " + (data.error || "Unknown error"));
+              } catch(e) { alert("Error: " + e.message); }
             }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
               Annual — $99/year 🏆 Best Value
             </button>
