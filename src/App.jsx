@@ -1140,6 +1140,108 @@ export default function App() {
             {/* TAX REPORT */}
             {activeTab === "tax report" && (
               <>
+                {/* Tax Report Action Buttons */}
+                <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => {
+                      const year = new Date().getFullYear();
+                      const expenseRows = Object.entries(taxSummary).map(([label, amt]) =>
+                        `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
+                      ).join("");
+                      const propRows = propStats.map(p =>
+                        `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
+                      ).join("");
+                      const html = `<html><head><title>${business?.name || "LandlordLedger"} — Tax Report ${year}</title>
+                        <style>
+                          body{font-family:Georgia,serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
+                          h1{font-size:22px;margin-bottom:4px}
+                          h2{font-size:14px;color:#555;margin-bottom:24px;font-weight:normal}
+                          h3{font-size:15px;margin:28px 0 8px;border-bottom:2px solid #ccc;padding-bottom:6px}
+                          table{width:100%;border-collapse:collapse;margin-bottom:8px}
+                          th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:13px;border-bottom:2px solid #ccc}
+                          th:not(:first-child){text-align:right}
+                          td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
+                          .total td{font-weight:bold;font-size:15px;border-top:2px solid #ccc;border-bottom:none}
+                          .note{font-size:11px;color:#888;margin-top:4px}
+                        </style>
+                        </head><body>
+                        <h1>${business?.name || "LandlordLedger"} — Tax Report</h1>
+                        <h2>Tax Year ${year} &nbsp;·&nbsp; Schedule E Summary &nbsp;·&nbsp; Consult your CPA before filing.</h2>
+                        <h3>Schedule E — Deductible Expenses</h3>
+                        <table>
+                          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                          <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
+                          <tfoot><tr class="total"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(totalExpenses)}</td></tr></tfoot>
+                        </table>
+                        <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies.</p>
+                        <h3>Net P&amp;L by Property</h3>
+                        <table>
+                          <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net</th></tr></thead>
+                          <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
+                        </table>
+                        </body></html>`;
+                      const w = window.open("", "_blank");
+                      w.document.write(html);
+                      w.document.close();
+                      w.print();
+                    }}
+                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    🖨️ Print Tax Report
+                  </button>
+                  <button
+                    onClick={() => {
+                      const header = "Date,Property,Description,Category,Amount,Type\n";
+                      const rows = transactions.map(t => {
+                        const prop = properties.find(p => p.id === t.property_id);
+                        return [
+                          t.transaction_date,
+                          `"${(prop?.name || "").replace(/"/g, '""')}"`,
+                          `"${(t.description || "").replace(/"/g, '""')}"`,
+                          `"${(t.category || "").replace(/"/g, '""')}"`,
+                          t.amount,
+                          t.amount >= 0 ? "Income" : "Expense"
+                        ].join(",");
+                      }).join("\n");
+                      const blob = new Blob([header + rows], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "LandlordLedger-All-Transactions.csv";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    📥 Export All CSV
+                  </button>
+                  <button
+                    onClick={() => {
+                      const header = "Date,Property,Description,Category,Amount,Type\n";
+                      properties.forEach(prop => {
+                        const rows = transactions.filter(t => t.property_id === prop.id).map(t => [
+                          t.transaction_date,
+                          `"${prop.name.replace(/"/g, '""')}"`,
+                          `"${(t.description || "").replace(/"/g, '""')}"`,
+                          `"${(t.category || "").replace(/"/g, '""')}"`,
+                          t.amount,
+                          t.amount >= 0 ? "Income" : "Expense"
+                        ].join(",")).join("\n");
+                        const blob = new Blob([header + rows], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `LandlordLedger-${prop.name.replace(/[^a-z0-9]/gi, "-")}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      });
+                    }}
+                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    📥 Export by Property
+                  </button>
+                </div>
+
                 <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16 }}>
                   <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 4 }}>SCHEDULE E — DEDUCTIBLE EXPENSES</div>
                   <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>Year-to-date. Consult your CPA before filing.</div>
