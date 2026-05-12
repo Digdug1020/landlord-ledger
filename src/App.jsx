@@ -1127,6 +1127,65 @@ export default function App() {
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
                             <button onClick={() => openEditProperty(p)} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
                             <button onClick={() => printProperty(p, transactions)} style={{ background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 8, padding: "6px 12px", color: "#4ade80", cursor: "pointer", fontSize: 12 }}>🖨️ Print</button>
+                            <button onClick={() => {
+                              const txs = transactions.filter(t => t.property_id === p.id);
+                              const income = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+                              const expenses = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+                              const net = income - expenses;
+                              const rows = txs.map(t => `<tr><td>${t.transaction_date}</td><td>${t.description || ""}</td><td>${t.category || "—"}</td><td style="text-align:right;color:${t.amount >= 0 ? "green" : "#c0392b"}">${fmt(t.amount)}</td></tr>`).join("");
+                              const html = `<html><head><title>${p.name} — LandlordLedger</title>
+                                <style>
+                                  @media print{@page{margin:1in;size:letter}}
+                                  body{font-family:Arial,sans-serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
+                                  h1{font-size:20px;margin-bottom:2px}
+                                  .subtitle{font-size:12px;color:#555;margin-bottom:16px}
+                                  table{width:100%;border-collapse:collapse;margin-top:12px}
+                                  th{background:#f0f0f0;text-align:left;padding:7px 10px;font-size:11px;border-bottom:2px solid #ccc;text-transform:uppercase;letter-spacing:.04em}
+                                  th:last-child{text-align:right}
+                                  td{padding:7px 10px;font-size:12px;border-bottom:1px solid #eee}
+                                  td:last-child{text-align:right}
+                                  .summary{margin-top:20px;border-top:2px solid #ccc;padding-top:14px}
+                                  .summary div{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
+                                  .summary .net{font-weight:bold;font-size:15px;border-top:1px solid #ccc;padding-top:8px;margin-top:4px}
+                                </style>
+                                </head><body>
+                                <h1>${p.name}</h1>
+                                <div class="subtitle">${p.address || ""}${p.address && p.property_type ? " &nbsp;|&nbsp; " : ""}${p.property_type || ""} &nbsp;|&nbsp; YTD</div>
+                                <table>
+                                  <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                                  <tbody>${rows || "<tr><td colspan='4' style='color:#888'>No transactions.</td></tr>"}</tbody>
+                                </table>
+                                <div class="summary">
+                                  <div><span>Total Income</span><span style="color:green">${fmt(income)}</span></div>
+                                  <div><span>Total Expenses</span><span style="color:#c0392b">${fmt(expenses)}</span></div>
+                                  <div class="net"><span>Net P&L</span><span style="color:${net >= 0 ? "green" : "#c0392b"}">${fmt(net)}</span></div>
+                                </div>
+                                </body></html>`;
+                              const w = window.open("", "_blank");
+                              w.document.write(html);
+                              w.document.close();
+                              w.print();
+                            }} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#93c5fd", cursor: "pointer", fontSize: 12 }}>📄 PDF</button>
+                            <button onClick={() => {
+                              const txs = transactions.filter(t => t.property_id === p.id);
+                              const header = "Date,Description,Category,Amount,Type\n";
+                              const rows = txs.map(t => [
+                                t.transaction_date,
+                                `"${(t.description || "").replace(/"/g, '""')}"`,
+                                `"${(t.category || "").replace(/"/g, '""')}"`,
+                                t.amount,
+                                t.amount >= 0 ? "Income" : "Expense"
+                              ].join(",")).join("\n");
+                              const blob = new Blob([header + rows], { type: "text/csv" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `LandlordLedger-${p.name.replace(/[^a-z0-9]/gi, "-")}.csv`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                            }} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>📥 CSV</button>
                           </div>
                         </div>
                         {p.note && <div style={{ fontSize: 12, color: "#94a3b8", borderTop: "1px solid #1e2235", paddingTop: 8, marginTop: 6 }}>{p.note}</div>}
@@ -1208,37 +1267,64 @@ export default function App() {
                       const a = document.createElement("a");
                       a.href = url;
                       a.download = "LandlordLedger-All-Transactions.csv";
+                      document.body.appendChild(a);
                       a.click();
+                      document.body.removeChild(a);
                       URL.revokeObjectURL(url);
                     }}
                     style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
                   >
-                    📥 Export All CSV
+                    📥 Export All Transactions CSV
                   </button>
                   <button
                     onClick={() => {
-                      const header = "Date,Property,Description,Category,Amount,Type\n";
-                      properties.forEach(prop => {
-                        const rows = transactions.filter(t => t.property_id === prop.id).map(t => [
-                          t.transaction_date,
-                          `"${prop.name.replace(/"/g, '""')}"`,
-                          `"${(t.description || "").replace(/"/g, '""')}"`,
-                          `"${(t.category || "").replace(/"/g, '""')}"`,
-                          t.amount,
-                          t.amount >= 0 ? "Income" : "Expense"
-                        ].join(",")).join("\n");
-                        const blob = new Blob([header + rows], { type: "text/csv" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `LandlordLedger-${prop.name.replace(/[^a-z0-9]/gi, "-")}.csv`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      });
+                      const year = new Date().getFullYear();
+                      const expenseRows = Object.entries(taxSummary).map(([label, amt]) =>
+                        `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
+                      ).join("");
+                      const propRows = propStats.map(p =>
+                        `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
+                      ).join("");
+                      const html = `<html><head><title>${business?.name || "LandlordLedger"} — Schedule E ${year}</title>
+                        <style>
+                          @media print{@page{margin:1in;size:letter}}
+                          body{font-family:Arial,sans-serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
+                          h1{font-size:20px;margin-bottom:2px;font-weight:bold}
+                          .subtitle{font-size:12px;color:#555;margin-bottom:8px}
+                          .divider{border:none;border-top:2px solid #333;margin:16px 0}
+                          h3{font-size:13px;font-weight:bold;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.05em;color:#333}
+                          table{width:100%;border-collapse:collapse;margin-bottom:6px}
+                          th{text-align:left;padding:6px 10px;font-size:11px;border-bottom:2px solid #333;text-transform:uppercase;letter-spacing:.04em}
+                          th:not(:first-child){text-align:right}
+                          td{padding:7px 10px;font-size:12px;border-bottom:1px solid #ddd}
+                          .total-row td{font-weight:bold;font-size:13px;border-top:2px solid #333;border-bottom:none;padding-top:10px}
+                          .note{font-size:10px;color:#777;margin-top:6px;font-style:italic}
+                        </style>
+                        </head><body>
+                        <h1>${business?.name || "LandlordLedger"}</h1>
+                        <div class="subtitle">Schedule E Tax Summary &nbsp;|&nbsp; Tax Year ${year} &nbsp;|&nbsp; Generated ${new Date().toLocaleDateString()}</div>
+                        <hr class="divider"/>
+                        <h3>Deductible Expenses</h3>
+                        <table>
+                          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                          <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
+                          <tr class="total-row"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(totalExpenses)}</td></tr>
+                        </table>
+                        <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.</p>
+                        <h3>Net P&amp;L by Property</h3>
+                        <table>
+                          <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net P&L</th></tr></thead>
+                          <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
+                        </table>
+                        </body></html>`;
+                      const w = window.open("", "_blank");
+                      w.document.write(html);
+                      w.document.close();
+                      w.print();
                     }}
                     style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
                   >
-                    📥 Export by Property
+                    📄 Export Tax Report PDF
                   </button>
                 </div>
 
