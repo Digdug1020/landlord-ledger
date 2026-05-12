@@ -56,9 +56,10 @@ function LoginScreen() {
   async function signInWithGoogle() {
     setLoading(true);
     setError("");
+    const origin = window.location.origin.replace(/\/+$/, "");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin }
+      options: { redirectTo: origin }
     });
     if (error) { setError(error.message); setLoading(false); }
   }
@@ -74,7 +75,7 @@ function LoginScreen() {
       else { setSuccess("Check your email for a confirmation link!"); }
     } else if (mode === "forgot") {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#reset-password`
+        redirectTo: `${window.location.origin.replace(/\/+$/, "")}/#reset-password`
       });
       if (error) { setError(error.message); }
       else { setSuccess("Password reset email sent! Check your inbox."); }
