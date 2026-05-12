@@ -370,6 +370,9 @@ export default function App() {
       if (_event === "PASSWORD_RECOVERY") {
         setIsResettingPassword(true);
       }
+      if (_event === "SIGNED_IN") {
+        window.history.replaceState({}, document.title, "/");
+      }
       setSession(session);
     });
     return () => subscription.unsubscribe();
