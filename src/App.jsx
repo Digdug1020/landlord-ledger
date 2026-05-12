@@ -56,10 +56,11 @@ function LoginScreen() {
   async function signInWithGoogle() {
     setLoading(true);
     setError("");
-    const origin = window.location.origin.replace(/\/+$/, "");
+    Object.keys(sessionStorage).filter(k => k.startsWith('supabase')).forEach(k => sessionStorage.removeItem(k));
+    Object.keys(localStorage).filter(k => k.startsWith('supabase')).forEach(k => localStorage.removeItem(k));
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: origin }
+      options: { redirectTo: "https://www.landlord-ledger.app" }
     });
     if (error) { setError(error.message); setLoading(false); }
   }
@@ -373,6 +374,12 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!session && showLogin) {
+      supabase.auth.signOut();
+    }
+  }, [session, showLogin]);
 
   useEffect(() => {
     if (!session) return;

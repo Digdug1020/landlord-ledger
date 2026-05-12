@@ -1,4 +1,5 @@
 import React from "react";
+import { supabase } from "./supabaseClient";
 
 const features = [
   {
@@ -63,6 +64,11 @@ function FeatureCard({ icon, title, desc }) {
 }
 
 export default function Landing({ onGetStarted }) {
+  async function handleGetStarted() {
+    await supabase.auth.signOut();
+    onGetStarted();
+  }
+
   return (
     <div style={{ background: "#080b12", minHeight: "100vh", color: "#f1f5f9", fontFamily: "system-ui, sans-serif" }}>
 
@@ -76,7 +82,7 @@ export default function Landing({ onGetStarted }) {
           Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
         </div>
         <button
-          onClick={onGetStarted}
+          onClick={handleGetStarted}
           style={{
             background: "#3b82f6", color: "#fff", border: "none",
             borderRadius: 10, padding: "10px 22px", fontSize: 15,
@@ -118,7 +124,7 @@ export default function Landing({ onGetStarted }) {
         </p>
         <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
           <button
-            onClick={onGetStarted}
+            onClick={handleGetStarted}
             style={{
               background: "#3b82f6", color: "#fff", border: "none",
               borderRadius: 12, padding: "16px 36px", fontSize: 17,
@@ -128,7 +134,7 @@ export default function Landing({ onGetStarted }) {
             Start Free Trial
           </button>
           <button
-            onClick={onGetStarted}
+            onClick={handleGetStarted}
             style={{
               background: "transparent", color: "#cbd5e1",
               border: "1px solid #2d3555",
@@ -246,7 +252,7 @@ export default function Landing({ onGetStarted }) {
                 </li>
               ))}
             </ul>
-            <button onClick={onGetStarted} style={{
+            <button onClick={handleGetStarted} style={{
               width: "100%", padding: "13px 0", borderRadius: 10,
               background: "transparent", border: "1px solid #2d3555",
               color: "#cbd5e1", fontSize: 15, fontWeight: 600, cursor: "pointer",
@@ -285,7 +291,7 @@ export default function Landing({ onGetStarted }) {
                 </li>
               ))}
             </ul>
-            <button onClick={onGetStarted} style={{
+            <button onClick={handleGetStarted} style={{
               width: "100%", padding: "13px 0", borderRadius: 10,
               background: "#3b82f6", border: "none",
               color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer",
@@ -312,7 +318,7 @@ export default function Landing({ onGetStarted }) {
           Free to start — no credit card needed.
         </p>
         <button
-          onClick={onGetStarted}
+          onClick={handleGetStarted}
           style={{
             background: "#3b82f6", color: "#fff", border: "none",
             borderRadius: 14, padding: "18px 48px", fontSize: 18,
