@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { useState, useMemo, useEffect } from "react";
+import Landing from "./Landing";
 
 const CATEGORIES = ["Loan Payment", "Materials", "Repairs", "Insurance", "Utilities", "Labor", "Equipment", "Platform Fees", "Other"];
 
@@ -318,6 +319,7 @@ function ResetPasswordScreen() {
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [showLogin, setShowLogin] = useState(false);
   const [business, setBusiness] = useState(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -544,7 +546,10 @@ export default function App() {
   );
 
   if (isResettingPassword) return <ResetPasswordScreen />;
-  if (!session) return <LoginScreen />;
+  if (!session) {
+    if (showLogin) return <LoginScreen />;
+    return <Landing onGetStarted={() => setShowLogin(true)} />;
+  }
 
   if (needsOnboarding) return <OnboardingScreen session={session} onComplete={() => { setNeedsOnboarding(false); setDataLoading(true); window.location.reload(); }} />;
 
