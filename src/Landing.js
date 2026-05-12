@@ -212,7 +212,7 @@ export default function Landing({ onGetStarted }) {
       </section>
 
       {/* Pricing */}
-      <section style={{ maxWidth: 900, margin: "0 auto", padding: "60px 24px" }}>
+      <section style={{ maxWidth: 800, margin: "0 auto", padding: "60px 24px" }}>
         <h2 style={{
           textAlign: "center", fontSize: 32, fontWeight: 800,
           marginBottom: 12, color: "#f1f5f9",
@@ -223,23 +223,24 @@ export default function Landing({ onGetStarted }) {
           textAlign: "center", color: "#94a3b8", fontSize: 16,
           marginBottom: 48,
         }}>
-          Start free, upgrade when you're ready.
+          All features included on every plan.
         </p>
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
           gap: 20,
+          marginBottom: 24,
         }}>
-          {/* Free */}
+          {/* Monthly */}
           <div style={{
             background: "#0f1117", border: "1px solid #1e2235",
             borderRadius: 20, padding: "36px 32px",
           }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>Free</div>
-            <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>$0</div>
-            <div style={{ fontSize: 13, color: "#475569", marginBottom: 28 }}>forever</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>Monthly</div>
+            <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>$12</div>
+            <div style={{ fontSize: 13, color: "#475569", marginBottom: 28 }}>per month</div>
             <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-              {["Up to 2 properties", "Unlimited transactions", "Basic P&L reports", "CSV export"].map(item => (
+              {["Unlimited properties", "Unlimited transactions", "P&L reports", "Tax reports", "Recurring transactions", "Mobile app"].map(item => (
                 <li key={item} style={{ fontSize: 14, color: "#94a3b8", display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ color: "#3b82f6", fontWeight: 700 }}>✓</span> {item}
                 </li>
@@ -250,11 +251,11 @@ export default function Landing({ onGetStarted }) {
               background: "transparent", border: "1px solid #2d3555",
               color: "#cbd5e1", fontSize: 15, fontWeight: 600, cursor: "pointer",
             }}>
-              Get Started Free
+              Start Free Trial
             </button>
           </div>
 
-          {/* Monthly */}
+          {/* Annual */}
           <div style={{
             background: "#0f1a2e", border: "2px solid #3b82f6",
             borderRadius: 20, padding: "36px 32px", position: "relative",
@@ -264,13 +265,21 @@ export default function Landing({ onGetStarted }) {
               background: "#3b82f6", color: "#fff", fontSize: 12, fontWeight: 700,
               borderRadius: 99, padding: "4px 16px", letterSpacing: "0.05em",
             }}>
-              MOST POPULAR
+              BEST VALUE
             </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#60a5fa", marginBottom: 12 }}>Pro Monthly</div>
-            <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>$12</div>
-            <div style={{ fontSize: 13, color: "#475569", marginBottom: 28 }}>per month</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#60a5fa", marginBottom: 12 }}>Annual</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+              <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f5f9" }}>$99</div>
+              <div style={{
+                background: "#14532d", color: "#4ade80",
+                fontSize: 12, fontWeight: 700, borderRadius: 6, padding: "3px 8px",
+              }}>
+                Save 31%
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "#475569", marginBottom: 28 }}>per year · $8.25/mo</div>
             <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-              {["Unlimited properties", "Unlimited transactions", "Full P&L & tax reports", "CSV export", "Priority support"].map(item => (
+              {["Unlimited properties", "Unlimited transactions", "P&L reports", "Tax reports", "Recurring transactions", "Mobile app"].map(item => (
                 <li key={item} style={{ fontSize: 14, color: "#cbd5e1", display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ color: "#3b82f6", fontWeight: 700 }}>✓</span> {item}
                 </li>
@@ -284,38 +293,9 @@ export default function Landing({ onGetStarted }) {
               Start Free Trial
             </button>
           </div>
-
-          {/* Annual */}
-          <div style={{
-            background: "#0f1117", border: "1px solid #1e2235",
-            borderRadius: 20, padding: "36px 32px",
-          }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>Pro Annual</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 42, fontWeight: 800, color: "#f1f5f9" }}>$99</div>
-              <div style={{
-                background: "#14532d", color: "#4ade80",
-                fontSize: 12, fontWeight: 700, borderRadius: 6, padding: "3px 8px",
-              }}>
-                Save 31%
-              </div>
-            </div>
-            <div style={{ fontSize: 13, color: "#475569", marginBottom: 28 }}>per year · $8.25/mo</div>
-            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-              {["Everything in Pro Monthly", "2 months free", "Recurring transaction templates", "Priority support"].map(item => (
-                <li key={item} style={{ fontSize: 14, color: "#94a3b8", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ color: "#3b82f6", fontWeight: 700 }}>✓</span> {item}
-                </li>
-              ))}
-            </ul>
-            <button onClick={onGetStarted} style={{
-              width: "100%", padding: "13px 0", borderRadius: 10,
-              background: "transparent", border: "1px solid #2d3555",
-              color: "#cbd5e1", fontSize: 15, fontWeight: 600, cursor: "pointer",
-            }}>
-              Start Free Trial
-            </button>
-          </div>
+        </div>
+        <div style={{ textAlign: "center", fontSize: 14, color: "#475569" }}>
+          30-day free trial on all plans. No credit card required.
         </div>
       </section>
 
