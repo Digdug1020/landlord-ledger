@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
 import { useState, useMemo, useEffect } from "react";
 import Landing from "./Landing";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const CATEGORIES = ["Loan Payment", "Materials", "Repairs", "Insurance", "Utilities", "Labor", "Equipment", "Platform Fees", "Other"];
 
@@ -1132,39 +1134,56 @@ export default function App() {
                               const income = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
                               const expenses = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
                               const net = income - expenses;
-                              const rows = txs.map(t => `<tr><td>${t.transaction_date}</td><td>${t.description || ""}</td><td>${t.category || "—"}</td><td style="text-align:right;color:${t.amount >= 0 ? "green" : "#c0392b"}">${fmt(t.amount)}</td></tr>`).join("");
-                              const html = `<html><head><title>${p.name} — LandlordLedger</title>
-                                <style>
-                                  @media print{@page{margin:1in;size:letter}}
-                                  body{font-family:Arial,sans-serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
-                                  h1{font-size:20px;margin-bottom:2px}
-                                  .subtitle{font-size:12px;color:#555;margin-bottom:16px}
-                                  table{width:100%;border-collapse:collapse;margin-top:12px}
-                                  th{background:#f0f0f0;text-align:left;padding:7px 10px;font-size:11px;border-bottom:2px solid #ccc;text-transform:uppercase;letter-spacing:.04em}
-                                  th:last-child{text-align:right}
-                                  td{padding:7px 10px;font-size:12px;border-bottom:1px solid #eee}
-                                  td:last-child{text-align:right}
-                                  .summary{margin-top:20px;border-top:2px solid #ccc;padding-top:14px}
-                                  .summary div{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
-                                  .summary .net{font-weight:bold;font-size:15px;border-top:1px solid #ccc;padding-top:8px;margin-top:4px}
-                                </style>
-                                </head><body>
-                                <h1>${p.name}</h1>
-                                <div class="subtitle">${p.address || ""}${p.address && p.property_type ? " &nbsp;|&nbsp; " : ""}${p.property_type || ""} &nbsp;|&nbsp; YTD</div>
-                                <table>
-                                  <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-                                  <tbody>${rows || "<tr><td colspan='4' style='color:#888'>No transactions.</td></tr>"}</tbody>
-                                </table>
-                                <div class="summary">
-                                  <div><span>Total Income</span><span style="color:green">${fmt(income)}</span></div>
-                                  <div><span>Total Expenses</span><span style="color:#c0392b">${fmt(expenses)}</span></div>
-                                  <div class="net"><span>Net P&L</span><span style="color:${net >= 0 ? "green" : "#c0392b"}">${fmt(net)}</span></div>
-                                </div>
-                                </body></html>`;
-                              const w = window.open("", "_blank");
-                              w.document.write(html);
-                              w.document.close();
-                              w.print();
+                              const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
+                              // Header bar
+                              doc.setFillColor(15, 17, 23);
+                              doc.rect(0, 0, 216, 28, 'F');
+                              doc.setFontSize(16);
+                              doc.setFont('helvetica', 'bold');
+                              doc.setTextColor(255, 255, 255);
+                              const landlordW = doc.getTextWidth('Landlord');
+                              doc.text('Landlord', 14, 18);
+                              doc.setTextColor(59, 130, 246);
+                              doc.text('Ledger', 14 + landlordW, 18);
+                              // Property heading
+                              doc.setTextColor(30, 30, 30);
+                              doc.setFontSize(15);
+                              doc.text(p.name, 14, 42);
+                              const meta = [p.address, p.property_type].filter(Boolean).join('  |  ');
+                              if (meta) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100); doc.text(meta, 14, 49); }
+                              doc.setDrawColor(59, 130, 246);
+                              doc.setLineWidth(0.4);
+                              doc.line(14, 54, 202, 54);
+                              // Transactions table
+                              autoTable(doc, {
+                                startY: 58,
+                                head: [['Date', 'Description', 'Category', 'Amount']],
+                                body: txs.length ? txs.map(t => [t.transaction_date, t.description || '', t.category || '—', fmt(t.amount)]) : [['—', 'No transactions', '', '']],
+                                styles: { fontSize: 9, cellPadding: 3 },
+                                headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
+                                columnStyles: { 3: { halign: 'right' } },
+                                alternateRowStyles: { fillColor: [248, 250, 252] },
+                              });
+                              // Summary box
+                              const sy = doc.lastAutoTable.finalY + 8;
+                              doc.setFillColor(239, 246, 255);
+                              doc.rect(14, sy, 188, 30, 'F');
+                              doc.setFontSize(9);
+                              doc.setFont('helvetica', 'normal');
+                              doc.setTextColor(60, 60, 60);
+                              doc.text('Total Income', 20, sy + 9);
+                              doc.setTextColor(22, 163, 74);
+                              doc.text(fmt(income), 200, sy + 9, { align: 'right' });
+                              doc.setTextColor(60, 60, 60);
+                              doc.text('Total Expenses', 20, sy + 17);
+                              doc.setTextColor(220, 38, 38);
+                              doc.text(fmt(expenses), 200, sy + 17, { align: 'right' });
+                              doc.setFont('helvetica', 'bold');
+                              doc.setTextColor(30, 30, 30);
+                              doc.text('Net P&L', 20, sy + 25);
+                              doc.setTextColor(...(net >= 0 ? [22, 163, 74] : [220, 38, 38]));
+                              doc.text(fmt(net), 200, sy + 25, { align: 'right' });
+                              doc.save(`LandlordLedger-${p.name.replace(/[^a-z0-9]/gi, '-')}.pdf`);
                             }} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#93c5fd", cursor: "pointer", fontSize: 12 }}>📄 PDF</button>
                             <button onClick={() => {
                               const txs = transactions.filter(t => t.property_id === p.id);
@@ -1279,48 +1298,71 @@ export default function App() {
                   <button
                     onClick={() => {
                       const year = new Date().getFullYear();
-                      const expenseRows = Object.entries(taxSummary).map(([label, amt]) =>
-                        `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
-                      ).join("");
-                      const propRows = propStats.map(p =>
-                        `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
-                      ).join("");
-                      const html = `<html><head><title>${business?.name || "LandlordLedger"} — Schedule E ${year}</title>
-                        <style>
-                          @media print{@page{margin:1in;size:letter}}
-                          body{font-family:Arial,sans-serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
-                          h1{font-size:20px;margin-bottom:2px;font-weight:bold}
-                          .subtitle{font-size:12px;color:#555;margin-bottom:8px}
-                          .divider{border:none;border-top:2px solid #333;margin:16px 0}
-                          h3{font-size:13px;font-weight:bold;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.05em;color:#333}
-                          table{width:100%;border-collapse:collapse;margin-bottom:6px}
-                          th{text-align:left;padding:6px 10px;font-size:11px;border-bottom:2px solid #333;text-transform:uppercase;letter-spacing:.04em}
-                          th:not(:first-child){text-align:right}
-                          td{padding:7px 10px;font-size:12px;border-bottom:1px solid #ddd}
-                          .total-row td{font-weight:bold;font-size:13px;border-top:2px solid #333;border-bottom:none;padding-top:10px}
-                          .note{font-size:10px;color:#777;margin-top:6px;font-style:italic}
-                        </style>
-                        </head><body>
-                        <h1>${business?.name || "LandlordLedger"}</h1>
-                        <div class="subtitle">Schedule E Tax Summary &nbsp;|&nbsp; Tax Year ${year} &nbsp;|&nbsp; Generated ${new Date().toLocaleDateString()}</div>
-                        <hr class="divider"/>
-                        <h3>Deductible Expenses</h3>
-                        <table>
-                          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-                          <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
-                          <tr class="total-row"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(totalExpenses)}</td></tr>
-                        </table>
-                        <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.</p>
-                        <h3>Net P&amp;L by Property</h3>
-                        <table>
-                          <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net P&L</th></tr></thead>
-                          <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
-                        </table>
-                        </body></html>`;
-                      const w = window.open("", "_blank");
-                      w.document.write(html);
-                      w.document.close();
-                      w.print();
+                      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
+                      // Header bar
+                      doc.setFillColor(15, 17, 23);
+                      doc.rect(0, 0, 216, 28, 'F');
+                      doc.setFontSize(16);
+                      doc.setFont('helvetica', 'bold');
+                      doc.setTextColor(255, 255, 255);
+                      const lw = doc.getTextWidth('Landlord');
+                      doc.text('Landlord', 14, 18);
+                      doc.setTextColor(59, 130, 246);
+                      doc.text('Ledger', 14 + lw, 18);
+                      // Title
+                      doc.setTextColor(30, 30, 30);
+                      doc.setFontSize(14);
+                      doc.setFont('helvetica', 'bold');
+                      doc.text(`${business?.name || 'Tax Report'} — Schedule E`, 14, 42);
+                      doc.setFontSize(9);
+                      doc.setFont('helvetica', 'normal');
+                      doc.setTextColor(100, 100, 100);
+                      doc.text(`Tax Year ${year}  |  Generated ${new Date().toLocaleDateString()}`, 14, 50);
+                      doc.setDrawColor(59, 130, 246);
+                      doc.setLineWidth(0.4);
+                      doc.line(14, 54, 202, 54);
+                      // Deductible expenses section
+                      doc.setFontSize(11);
+                      doc.setFont('helvetica', 'bold');
+                      doc.setTextColor(30, 30, 30);
+                      doc.text('Deductible Expenses', 14, 63);
+                      autoTable(doc, {
+                        startY: 67,
+                        head: [['Category', 'Amount']],
+                        body: Object.entries(taxSummary).length
+                          ? Object.entries(taxSummary).map(([label, amt]) => [label, fmt(amt)])
+                          : [['No expenses logged', '']],
+                        foot: [['Total Deductible Expenses', fmt(totalExpenses)]],
+                        styles: { fontSize: 9, cellPadding: 3 },
+                        headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
+                        footStyles: { fillColor: [239, 246, 255], textColor: [30, 30, 30], fontStyle: 'bold' },
+                        columnStyles: { 1: { halign: 'right' } },
+                        alternateRowStyles: { fillColor: [248, 250, 252] },
+                      });
+                      // Note
+                      const noteY = doc.lastAutoTable.finalY + 5;
+                      doc.setFontSize(7);
+                      doc.setFont('helvetica', 'italic');
+                      doc.setTextColor(150, 150, 150);
+                      doc.text('* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.', 14, noteY, { maxWidth: 188 });
+                      // Net P&L by property section
+                      const y2 = noteY + 10;
+                      doc.setFontSize(11);
+                      doc.setFont('helvetica', 'bold');
+                      doc.setTextColor(30, 30, 30);
+                      doc.text('Net P&L by Property', 14, y2);
+                      autoTable(doc, {
+                        startY: y2 + 4,
+                        head: [['Property', 'Gross Income', 'Expenses', 'Net P&L']],
+                        body: propStats.length
+                          ? propStats.map(p => [p.name + (p.address ? `\n${p.address}` : ''), fmt(p.income), fmt(p.expenses), fmt(p.net)])
+                          : [['No properties', '', '', '']],
+                        styles: { fontSize: 9, cellPadding: 3 },
+                        headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
+                        columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+                        alternateRowStyles: { fillColor: [248, 250, 252] },
+                      });
+                      doc.save(`LandlordLedger-TaxReport-${year}.pdf`);
                     }}
                     style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
                   >
