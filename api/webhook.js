@@ -36,8 +36,7 @@ async function handler(req, res) {
       if (business_id) {
         const { error } = await supabase
           .from('subscriptions')
-          .update({ status: 'pro', stripe_customer_id: session.customer })
-          .eq('business_id', business_id);
+          .upsert({ business_id, status: 'pro', stripe_customer_id: session.customer }, { onConflict: 'business_id' });
         if (error) throw error;
       }
     } else if (event.type === 'customer.subscription.deleted') {
