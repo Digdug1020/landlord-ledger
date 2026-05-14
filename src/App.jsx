@@ -1,8 +1,9 @@
 import { supabase } from './supabaseClient';
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Landing from "./Landing";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const CATEGORIES = ["Loan Payment", "Materials", "Repairs", "Insurance", "Utilities", "Labor", "Equipment", "Platform Fees", "Other"];
 
@@ -357,6 +358,16 @@ export default function App() {
   // Subscription state
   const [subscription, setSubscription] = useState({ status: "free" });
 
+  // Import state
+  const [importStep, setImportStep] = useState("upload"); // "upload" | "preview" | "done"
+  const [importRows, setImportRows] = useState([]);
+  const [importParsing, setImportParsing] = useState(false);
+  const [importError, setImportError] = useState(null);
+  const [importDoneCount, setImportDoneCount] = useState(0);
+  const [importPasteText, setImportPasteText] = useState("");
+  const [importDragging, setImportDragging] = useState(false);
+  const importDropRef = useRef(null);
+
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
     background: "#1e2235", border: "1px solid #2d3555",
@@ -554,6 +565,7 @@ export default function App() {
   const tabs = [
     { id: "dashboard", label: "Dashboard" },
     { id: "transactions", label: "Transactions" },
+    { id: "import", label: "Import" },
     { id: "monthly", label: "Monthly P&L" },
     { id: "recurring", label: "Recurring" },
     { id: "notes", label: "Notes" },
@@ -834,6 +846,296 @@ export default function App() {
                 </div>
               </>
             )}
+
+            {/* IMPORT */}
+            {activeTab === "import" && (() => {
+              const isPro = subscription?.status === "pro";
+              const existingImported = transactions.filter(t => t.source === "import").length;
+              const FREE_LIMIT = 50;
+              const PRO_WARN_LIMIT = 500;
+
+              // Count pro user's imports this calendar month
+              const thisMonthImported = (() => {
+                if (!isPro) return 0;
+                const start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
+                return transactions.filter(t => t.source === "import" && new Date(t.created_at) >= start).length;
+              })();
+
+              const activeImportRows = importRows.filter(r => !r._deleted);
+              const wouldExceedFree = !isPro && (existingImported + activeImportRows.length) > FREE_LIMIT;
+              const proMonthWarning = isPro && thisMonthImported + activeImportRows.length > PRO_WARN_LIMIT;
+
+              async function handleParseFile(file) {
+                setImportError(null);
+                setImportParsing(true);
+                setImportStep("upload");
+                try {
+                  let text = "";
+                  if (file.name.match(/\.xlsx?$/i)) {
+                    const buf = await file.arrayBuffer();
+                    const wb = XLSX.read(buf, { type: "array" });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    text = XLSX.utils.sheet_to_csv(ws);
+                  } else {
+                    text = await file.text();
+                  }
+                  await runParse(text);
+                } catch (e) {
+                  setImportError("Could not read file: " + e.message);
+                  setImportParsing(false);
+                }
+              }
+
+              async function runParse(text) {
+                setImportParsing(true);
+                setImportError(null);
+                try {
+                  const res = await fetch("/api/parse-import", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok || data.error) { setImportError(data.error || "Parsing failed."); setImportParsing(false); return; }
+
+                  const rows = data.transactions.map((t, i) => ({
+                    ...t,
+                    _id: i,
+                    _deleted: false,
+                    property_id: "",
+                    isDuplicate: transactions.some(ex =>
+                      ex.transaction_date === t.transaction_date &&
+                      Math.abs(Number(ex.amount)) === Math.abs(t.amount) &&
+                      (ex.description || "").toLowerCase() === (t.description || "").toLowerCase()
+                    ),
+                  }));
+                  setImportRows(rows);
+                  setImportStep("preview");
+                } catch (e) {
+                  setImportError("Network error. Please try again.");
+                } finally {
+                  setImportParsing(false);
+                }
+              }
+
+              async function handleConfirmImport() {
+                if (wouldExceedFree) return;
+                const toInsert = importRows
+                  .filter(r => !r._deleted)
+                  .map(r => ({
+                    business_id: business.id,
+                    property_id: r.property_id || null,
+                    transaction_date: r.transaction_date,
+                    description: r.description,
+                    category: r.category,
+                    amount: r.type === "expense" ? -Math.abs(r.amount) : Math.abs(r.amount),
+                    type: r.type,
+                    source: "import",
+                  }));
+                if (toInsert.length === 0) return;
+
+                const { data: inserted, error } = await supabase.from("transactions").insert(toInsert).select();
+                if (error) { setImportError("Import failed: " + error.message); return; }
+                setTransactions(prev => [...prev, ...inserted]);
+                setImportDoneCount(inserted.length);
+                setImportStep("done");
+              }
+
+              function resetImport() {
+                setImportStep("upload");
+                setImportRows([]);
+                setImportError(null);
+                setImportDoneCount(0);
+                setImportParsing(false);
+                setImportPasteText("");
+                setImportDragging(false);
+              }
+
+              function updateRow(id, field, value) {
+                setImportRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
+              }
+
+              // ── Step: done ───────────────────────────────────────────────
+              if (importStep === "done") return (
+                <div style={{ textAlign: "center", padding: "48px 16px" }}>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80", marginBottom: 8 }}>
+                    {importDoneCount} transaction{importDoneCount !== 1 ? "s" : ""} imported
+                  </div>
+                  <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 32 }}>They're now in your Transactions tab.</div>
+                  <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                    <button onClick={() => { resetImport(); setActiveTab("transactions"); }}
+                      style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "12px 24px", color: "#fff", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
+                      View Transactions
+                    </button>
+                    <button onClick={resetImport}
+                      style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 10, padding: "12px 24px", color: "#94a3b8", cursor: "pointer", fontSize: 15 }}>
+                      Import More
+                    </button>
+                  </div>
+                </div>
+              );
+
+              // ── Step: preview ────────────────────────────────────────────
+              if (importStep === "preview") return (
+                <>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>IMPORT — REVIEW TRANSACTIONS</div>
+
+                  {/* Free limit error */}
+                  {wouldExceedFree && (
+                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#f87171", marginBottom: 6 }}>Import limit reached</div>
+                      <div style={{ fontSize: 13, color: "#fca5a5" }}>
+                        This import is too large for your free trial. You've used {existingImported} of {FREE_LIMIT} total imported transactions.
+                        This file would add {activeImportRows.length} more. Try a smaller file or{" "}
+                        <span onClick={() => setActiveTab("billing")} style={{ color: "#3b82f6", cursor: "pointer", textDecoration: "underline" }}>subscribe for full access</span>.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pro monthly warning */}
+                  {proMonthWarning && (
+                    <div style={{ background: "#1a1a2e", border: "1px solid #a78bfa", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, color: "#c4b5fd" }}>
+                        ⚠️ Large import: you've imported {thisMonthImported + activeImportRows.length} transactions this month. Very large imports may incur additional fees on future paid tiers.
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 14, color: "#e2e8f0" }}>
+                      <span style={{ fontWeight: 700, color: "#4ade80" }}>{activeImportRows.length}</span> transactions parsed
+                      {!isPro && <span style={{ color: "#94a3b8", fontSize: 12 }}> · {existingImported} of {FREE_LIMIT} free slots used</span>}
+                    </div>
+                    <button onClick={resetImport}
+                      style={{ background: "transparent", border: "1px solid #2d3555", borderRadius: 8, padding: "7px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>
+                      ← Start Over
+                    </button>
+                  </div>
+
+                  {importError && (
+                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 10, padding: 12, marginBottom: 14, color: "#f87171", fontSize: 13 }}>{importError}</div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+                    {importRows.filter(r => !r._deleted).map(row => (
+                      <div key={row._id} style={{ background: "#0f1117", border: `1px solid ${row.isDuplicate ? "#854d0e" : "#1e2235"}`, borderRadius: 12, padding: 14 }}>
+                        {row.isDuplicate && (
+                          <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>⚠ POSSIBLE DUPLICATE</div>
+                        )}
+                        {row.recurring && (
+                          <div style={{ fontSize: 11, color: "#818cf8", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>↻ RECURRING</div>
+                        )}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                          <input type="date" value={row.transaction_date}
+                            onChange={e => updateRow(row._id, "transaction_date", e.target.value)}
+                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }} />
+                          <select value={row.type} onChange={e => updateRow(row._id, "type", e.target.value)}
+                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
+                            <option value="income">Income</option>
+                            <option value="expense">Expense</option>
+                          </select>
+                        </div>
+                        <input value={row.description} onChange={e => updateRow(row._id, "description", e.target.value)}
+                          placeholder="Description" style={{ ...inputStyle, fontSize: 13, padding: "8px 10px", marginBottom: 8 }} />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                          <input type="number" value={Math.abs(row.amount)}
+                            onChange={e => updateRow(row._id, "amount", Number(e.target.value))}
+                            placeholder="Amount" style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }} />
+                          <select value={row.category} onChange={e => updateRow(row._id, "category", e.target.value)}
+                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
+                            <option value="Income / Rent">Income / Rent</option>
+                            {["Loan Payment","Materials","Repairs","Insurance","Utilities","Labor","Equipment","Platform Fees","Other"].map(c =>
+                              <option key={c} value={c}>{c}</option>
+                            )}
+                          </select>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
+                          <select value={row.property_id} onChange={e => updateRow(row._id, "property_id", e.target.value)}
+                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
+                            <option value="">Shared / All Properties</option>
+                            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          <button onClick={() => updateRow(row._id, "_deleted", true)}
+                            style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 18, padding: "0 6px" }} title="Remove row">✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button onClick={handleConfirmImport} disabled={wouldExceedFree || activeImportRows.length === 0}
+                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
+                      background: wouldExceedFree || activeImportRows.length === 0 ? "#1e2235" : "#1d4ed8",
+                      color: wouldExceedFree || activeImportRows.length === 0 ? "#4b5563" : "#fff",
+                      fontSize: 16, fontWeight: 700, cursor: wouldExceedFree || activeImportRows.length === 0 ? "not-allowed" : "pointer" }}>
+                    Import {activeImportRows.length} Transaction{activeImportRows.length !== 1 ? "s" : ""}
+                  </button>
+                </>
+              );
+
+              // ── Step: upload ─────────────────────────────────────────────
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>IMPORT TRANSACTIONS</div>
+
+                  {!isPro && (
+                    <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#94a3b8" }}>
+                      Free trial: <span style={{ color: existingImported >= FREE_LIMIT ? "#f87171" : "#4ade80", fontWeight: 600 }}>{existingImported}</span> of {FREE_LIMIT} imported transactions used.
+                      {existingImported >= FREE_LIMIT && <> <span onClick={() => setActiveTab("billing")} style={{ color: "#3b82f6", cursor: "pointer" }}>Upgrade for unlimited →</span></>}
+                    </div>
+                  )}
+
+                  {/* Drop zone */}
+                  <div
+                    ref={importDropRef}
+                    onDragOver={e => { e.preventDefault(); setImportDragging(true); }}
+                    onDragLeave={() => setImportDragging(false)}
+                    onDrop={e => { e.preventDefault(); setImportDragging(false); const f = e.dataTransfer.files[0]; if (f) handleParseFile(f); }}
+                    onClick={() => document.getElementById("importFileInput").click()}
+                    style={{ border: `2px dashed ${importDragging ? "#3b82f6" : "#2d3555"}`, borderRadius: 14, padding: "32px 16px", textAlign: "center", cursor: "pointer", marginBottom: 16, background: importDragging ? "#0d1b3e" : "#0f1117", transition: "border-color 0.15s, background 0.15s" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+                    <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 4 }}>Drag & drop a file, or click to browse</div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>CSV · XLSX · XLS</div>
+                    <input id="importFileInput" type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+                      onChange={e => { const f = e.target.files[0]; if (f) handleParseFile(f); e.target.value = ""; }} />
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                    <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
+                    <div style={{ fontSize: 12, color: "#4b5563", fontFamily: "'Courier New', monospace" }}>OR PASTE TEXT</div>
+                    <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
+                  </div>
+
+                  <textarea value={importPasteText} onChange={e => setImportPasteText(e.target.value)}
+                    placeholder={"Paste CSV data, bank export, or any tab/comma separated text here…"}
+                    rows={6} style={{ ...inputStyle, resize: "vertical", fontSize: 13, fontFamily: "'Courier New', monospace", marginBottom: 12 }} />
+
+                  {importError && (
+                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 10, padding: 12, marginBottom: 12, color: "#f87171", fontSize: 13 }}>{importError}</div>
+                  )}
+
+                  <button
+                    onClick={() => { if (importPasteText.trim()) runParse(importPasteText); }}
+                    disabled={importParsing || !importPasteText.trim()}
+                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
+                      background: importParsing || !importPasteText.trim() ? "#1e2235" : "#1d4ed8",
+                      color: importParsing || !importPasteText.trim() ? "#4b5563" : "#fff",
+                      fontSize: 16, fontWeight: 700, cursor: importParsing || !importPasteText.trim() ? "not-allowed" : "pointer",
+                      marginBottom: 20 }}>
+                    {importParsing ? "Parsing with AI…" : "Parse with AI →"}
+                  </button>
+
+                  {/* Disclaimer */}
+                  <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 600, color: "#94a3b8", marginBottom: 4 }}>About imports</div>
+                    CSV and Excel files are sent to Claude AI for parsing. Your data is used only to extract transaction records and is not stored by Anthropic beyond the request.
+                    Review all transactions carefully before confirming — AI parsing may occasionally misread amounts, dates, or categories.
+                    Large files (&gt;1,000 rows) may take 10–30 seconds to parse.
+                    {!isPro && <> Free trial accounts are limited to {FREE_LIMIT} total imported transactions.</>}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* MONTHLY P&L */}
             {activeTab === "monthly" && (
