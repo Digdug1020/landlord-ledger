@@ -27,8 +27,8 @@ const {
   if (!process.env[k]) { console.error(`Missing required env var: ${k}`); process.exit(1); }
 });
 
-if ((OLD_OWNER_ID && !NEW_OWNER_ID) || (!OLD_OWNER_ID && NEW_OWNER_ID)) {
-  console.error('Set both OLD_OWNER_ID and NEW_OWNER_ID, or neither.');
+if (!NEW_OWNER_ID) {
+  console.error('Missing required env var: NEW_OWNER_ID (the production auth UUID for your account)');
   process.exit(1);
 }
 
@@ -39,13 +39,36 @@ const dst = createClient(NEW_SUPABASE_URL, NEW_SUPABASE_SERVICE_KEY, {
   auth: { persistSession: false },
 });
 
-// Remap owner_id when the user's auth UUID differs between projects
-function remapOwner(rows) {
-  if (!OLD_OWNER_ID || !NEW_OWNER_ID) return rows;
-  return rows.map(r =>
-    r.owner_id === OLD_OWNER_ID ? { ...r, owner_id: NEW_OWNER_ID } : r
-  );
+// Pick only the columns that exist in the production schema
+function pick(keys) {
+  return rows => rows.map(r => Object.fromEntries(keys.map(k => [k, r[k]])));
 }
+
+// businesses: old schema has no owner_id — inject the production user's UUID
+function transformBusinesses(rows) {
+  return rows.map(r => ({
+    id:         r.id,
+    name:       r.name,
+    owner_id:   NEW_OWNER_ID,
+    created_at: r.created_at,
+  }));
+}
+
+// properties: strip extra `active` column not present in production
+const transformProperties = pick([
+  'id', 'business_id', 'name', 'address', 'property_type', 'note', 'archived', 'created_at',
+]);
+
+// transactions: strip vendor, payment_method, notes, created_by
+const transformTransactions = pick([
+  'id', 'business_id', 'property_id', 'transaction_date', 'description',
+  'category', 'amount', 'type', 'source', 'created_at',
+]);
+
+// notes: strip updated_at, updated_by
+const transformNotes = pick([
+  'id', 'business_id', 'property_id', 'content',
+]);
 
 async function readAll(table) {
   let rows = [];
@@ -58,6 +81,7 @@ async function readAll(table) {
       .select('*')
       .range(from, from + pageSize - 1);
 
+    if (error && error.message.includes('schema cache')) return null; // table doesn't exist in source
     if (error) throw new Error(`Read "${table}" (offset ${from}): ${error.message}`);
     if (!data || data.length === 0) break;
     rows = rows.concat(data);
@@ -71,6 +95,10 @@ async function readAll(table) {
 async function migrateTable(table, transform) {
   const rows = await readAll(table);
 
+  if (rows === null) {
+    console.log(`  ${table}: (table not found in source — skipped)`);
+    return;
+  }
   if (rows.length === 0) {
     console.log(`  ${table}: (empty — skipped)`);
     return;
@@ -112,11 +140,11 @@ async function main() {
   await verifyConnections();
 
   // Order matters — children must come after their parents
-  await migrateTable('businesses',            remapOwner);
-  await migrateTable('properties');
+  await migrateTable('businesses',            transformBusinesses);
+  await migrateTable('properties',            transformProperties);
   await migrateTable('recurring_transactions');
-  await migrateTable('transactions');
-  await migrateTable('notes');
+  await migrateTable('transactions',          transformTransactions);
+  await migrateTable('notes',                 transformNotes);
   await migrateTable('subscriptions');
 
   console.log(`\nDone${DRY_RUN ? ' (no data was written)' : ''}.`);

@@ -25,5 +25,8 @@
     "development": [
       "last 1 chrome version"
     ]
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2"
   }
 }
