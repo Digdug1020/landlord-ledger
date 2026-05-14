@@ -394,12 +394,23 @@ export default function App() {
       if (!bizData) { setNeedsOnboarding(true); setDataLoading(false); return; }
       setBusiness(bizData);
 
-      const [{ data: txData }, { data: propData }, { data: recurData }, { data: notesData }] = await Promise.all([
+      const [
+        { data: txData, error: txErr },
+        { data: propData, error: propErr },
+        { data: recurData, error: recurErr },
+        { data: notesData, error: notesErr }
+      ] = await Promise.all([
         supabase.from("transactions").select("*").eq("business_id", bizData.id).order("transaction_date", { ascending: true }),
         supabase.from("properties").select("*").eq("business_id", bizData.id).eq("archived", false).order("name"),
         supabase.from("recurring_transactions").select("*").eq("business_id", bizData.id).eq("active", true).order("next_due_date"),
-        supabase.from("notes").select("*").eq("business_id", bizData.id)
+        supabase.from("notes").select("*").eq("business_id", bizData.id).order("updated_at", { ascending: false })
       ]);
+
+      if (txErr) console.error("[load] transactions error:", txErr.message);
+      if (propErr) console.error("[load] properties error:", propErr.message);
+      if (recurErr) console.error("[load] recurring error:", recurErr.message);
+      if (notesErr) console.error("[load] notes error:", notesErr.message);
+      console.log("[load] business_id:", bizData.id, "| notes returned:", notesData?.length ?? "null");
 
       if (txData) setTransactions(txData);
       if (propData) {
@@ -408,6 +419,7 @@ export default function App() {
       }
       if (recurData) setRecurring(recurData);
       if (notesData) {
+        // Order descending by updated_at so the most recently saved note wins when there are duplicates
         const general = notesData.find(n => !n.property_id);
         if (general) setGeneralNote({ id: general.id, content: general.content || "" });
         const propNotes = {};
