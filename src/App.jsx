@@ -365,18 +365,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // onAuthStateChange fires INITIAL_SESSION immediately — no need for getSession()
+    // which would set session twice and trigger loadData twice
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") setIsResettingPassword(true);
+      if (_event === "SIGNED_IN") window.history.replaceState({}, document.title, "/");
       setSession(session);
       setAuthLoading(false);
-    }).catch(() => setAuthLoading(false));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (_event === "PASSWORD_RECOVERY") {
-        setIsResettingPassword(true);
-      }
-      if (_event === "SIGNED_IN") {
-        window.history.replaceState({}, document.title, "/");
-      }
-      setSession(session);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -389,8 +384,10 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
+    let cancelled = false;
     async function loadData() {
       const { data: bizData } = await supabase.from("businesses").select("*").eq("owner_id", session.user.id).order("created_at", { ascending: true }).limit(1).maybeSingle();
+      if (cancelled) return;
       if (!bizData) { setNeedsOnboarding(true); setDataLoading(false); return; }
       setBusiness(bizData);
 
@@ -406,11 +403,12 @@ export default function App() {
         supabase.from("notes").select("*").eq("business_id", bizData.id).order("updated_at", { ascending: false })
       ]);
 
+      if (cancelled) return;
+
       if (txErr) console.error("[load] transactions error:", txErr.message);
       if (propErr) console.error("[load] properties error:", propErr.message);
       if (recurErr) console.error("[load] recurring error:", recurErr.message);
       if (notesErr) console.error("[load] notes error:", notesErr.message);
-      console.log("[load] business_id:", bizData.id, "| notes returned:", notesData?.length ?? "null");
 
       if (txData) setTransactions(txData);
       if (propData) {
@@ -425,35 +423,37 @@ export default function App() {
         notesData.filter(n => n.property_id).forEach(n => {
           if (!propNotes[n.property_id]) propNotes[n.property_id] = { id: n.id, content: n.content || "" };
         });
-        console.log("[load] propNotes keys:", Object.keys(propNotes));
-        console.log("[load] property ids from DB:", propData?.map(p => p.id));
         setPropertyNotes(propNotes);
       }
 
       // Load subscription
       const { data: subData } = await supabase.from("subscriptions").select("*").eq("business_id", bizData.id).maybeSingle();
-      if (subData) setSubscription(subData);
+      if (!cancelled && subData) setSubscription(subData);
 
       // Handle successful Stripe checkout redirect
       const params = new URLSearchParams(window.location.search);
       if (params.get("success") === "true") {
         await supabase.from("subscriptions").upsert([{ business_id: bizData.id, status: "pro" }], { onConflict: "business_id" });
-        setSubscription({ status: "pro" });
-        window.history.replaceState({}, "", "/");
+        if (!cancelled) {
+          setSubscription({ status: "pro" });
+          window.history.replaceState({}, "", "/");
+        }
       }
 
-      setDataLoading(false);
+      if (!cancelled) setDataLoading(false);
 
       // Auto backfill
       try {
         await fetch("/api/post-recurring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ business_id: bizData.id }) });
+        if (cancelled) return;
         const { data: freshTx } = await supabase.from("transactions").select("*").eq("business_id", bizData.id).order("transaction_date", { ascending: true });
-        if (freshTx) setTransactions(freshTx);
+        if (!cancelled && freshTx) setTransactions(freshTx);
         const { data: freshRecur } = await supabase.from("recurring_transactions").select("*").eq("business_id", bizData.id).eq("active", true).order("next_due_date");
-        if (freshRecur) setRecurring(freshRecur);
+        if (!cancelled && freshRecur) setRecurring(freshRecur);
       } catch(e) { console.error("Backfill error:", e); }
     }
     loadData();
+    return () => { cancelled = true; };
   }, [session]);
 
   async function runBackfill() {
