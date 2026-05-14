@@ -46,23 +46,30 @@ ${text}`;
   try {
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8096,
+      max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     });
 
     let content = message.content[0].text.trim();
-    // Strip markdown code fences if the model wraps the output anyway
-    content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+
+    // Extract the JSON array robustly: find the first [ and last ] in the
+    // response so any surrounding explanation text or code fences are ignored.
+    const arrayStart = content.indexOf('[');
+    const arrayEnd   = content.lastIndexOf(']');
+    if (arrayStart !== -1 && arrayEnd > arrayStart) {
+      content = content.slice(arrayStart, arrayEnd + 1);
+    }
 
     let transactions;
     try {
       transactions = JSON.parse(content);
     } catch {
-      console.error('parse-import: JSON parse failed, raw response:', content.slice(0, 500));
+      console.error('parse-import: JSON parse failed, raw response:', content.slice(0, 800));
       return res.status(500).json({ error: 'AI returned an unexpected format. Please try again.' });
     }
 
     if (!Array.isArray(transactions)) {
+      console.error('parse-import: response was not an array, type:', typeof transactions);
       return res.status(500).json({ error: 'AI returned an unexpected format. Please try again.' });
     }
 
