@@ -390,7 +390,7 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     async function loadData() {
-      const { data: bizData } = await supabase.from("businesses").select("*").eq("owner_id", session.user.id).single();
+      const { data: bizData } = await supabase.from("businesses").select("*").eq("owner_id", session.user.id).order("created_at", { ascending: true }).limit(1).maybeSingle();
       if (!bizData) { setNeedsOnboarding(true); setDataLoading(false); return; }
       setBusiness(bizData);
 
