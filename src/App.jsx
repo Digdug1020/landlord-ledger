@@ -1043,13 +1043,15 @@ export default function App() {
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8, borderTop: "1px solid #1e2235", paddingTop: 10 }}>
                     <button onClick={async () => {
                       setGeneralNoteSaving(true);
+                      console.log("[notes] general save triggered", { id: generalNote.id, contentLength: generalNote.content.length, business_id: business.id });
                       if (generalNote.id) {
                         const { error } = await supabase.from("notes").update({ content: generalNote.content }).eq("id", generalNote.id);
+                        console.log("[notes] general update result", { error: error ? { message: error.message, code: error.code, details: error.details } : null });
                         if (!error) setGeneralNote(v => ({ ...v, content: generalNote.content }));
                       } else {
                         const { data, error } = await supabase.from("notes").insert([{ business_id: business.id, content: generalNote.content }]).select().single();
+                        console.log("[notes] general insert result", { data, error: error ? { message: error.message, code: error.code, details: error.details } : null });
                         if (data) setGeneralNote({ id: data.id, content: data.content });
-                        else console.error("Note insert failed:", error?.message);
                       }
                       setGeneralNoteSaving(false);
                     }} style={{ background: "#1d4ed8", border: "none", borderRadius: 8, padding: "8px 18px", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
@@ -1074,14 +1076,15 @@ export default function App() {
                           <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#3b82f6", textDecoration: "none" }}>📅 Google Calendar</a>
                           <button onClick={async () => {
                             setPropertyNotesSaving(prev => ({ ...prev, [p.id]: true }));
+                            console.log("[notes] property save triggered", { property_id: p.id, note_id: note.id, contentLength: note.content.length, business_id: business.id });
                             if (note.id) {
                               const { error } = await supabase.from("notes").update({ content: note.content }).eq("id", note.id);
+                              console.log("[notes] property update result", { error: error ? { message: error.message, code: error.code, details: error.details } : null });
                               if (!error) setPropertyNotes(prev => ({ ...prev, [p.id]: { ...prev[p.id], content: note.content } }));
-                              else console.error("Note update failed:", error.message);
                             } else {
                               const { data, error } = await supabase.from("notes").insert([{ business_id: business.id, property_id: p.id, content: note.content }]).select().single();
+                              console.log("[notes] property insert result", { data, error: error ? { message: error.message, code: error.code, details: error.details } : null });
                               if (data) setPropertyNotes(prev => ({ ...prev, [p.id]: { id: data.id, content: data.content } }));
-                              else console.error("Note insert failed:", error?.message);
                             }
                             setPropertyNotesSaving(prev => ({ ...prev, [p.id]: false }));
                           }} style={{ background: "#1d4ed8", border: "none", borderRadius: 8, padding: "6px 16px", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
