@@ -419,11 +419,14 @@ export default function App() {
       }
       if (recurData) setRecurring(recurData);
       if (notesData) {
-        // Order descending by updated_at so the most recently saved note wins when there are duplicates
         const general = notesData.find(n => !n.property_id);
         if (general) setGeneralNote({ id: general.id, content: general.content || "" });
         const propNotes = {};
-        notesData.filter(n => n.property_id).forEach(n => { propNotes[n.property_id] = { id: n.id, content: n.content || "" }; });
+        notesData.filter(n => n.property_id).forEach(n => {
+          if (!propNotes[n.property_id]) propNotes[n.property_id] = { id: n.id, content: n.content || "" };
+        });
+        console.log("[load] propNotes keys:", Object.keys(propNotes));
+        console.log("[load] property ids from DB:", propData?.map(p => p.id));
         setPropertyNotes(propNotes);
       }
 
