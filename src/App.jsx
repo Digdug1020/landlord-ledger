@@ -369,6 +369,7 @@ export default function App() {
   const importDropRef = useRef(null);
   const [importFileName, setImportFileName] = useState("");
   const [showImportBatches, setShowImportBatches] = useState(false);
+  const [importDuplicates, setImportDuplicates] = useState([]); // [{ existing, imported }]
 
   // Transaction filter/sort state
   const [txSort, setTxSort] = useState("date-desc");
@@ -478,6 +479,12 @@ export default function App() {
     loadData();
     return () => { cancelled = true; };
   }, [session]);
+
+  useEffect(() => {
+    if (importStep === "duplicates" && importDuplicates.length === 0) {
+      setImportStep("done");
+    }
+  }, [importStep, importDuplicates]);
 
   async function runBackfill() {
     if (!business) return;
@@ -1085,9 +1092,12 @@ export default function App() {
 
                 const { data: inserted, error } = await supabase.from("transactions").insert(toInsert).select();
                 if (error) { setImportError("Import failed: " + error.message); return; }
+
+                // Snapshot pre-import transactions for duplicate detection (state update is async)
+                const prevTransactions = transactions;
                 setTransactions(prev => [...prev, ...inserted]);
 
-                // Insert recurring templates for rows the user flagged as recurring
+                // ── Recurring templates ──────────────────────────────────────
                 const activeRows = importRows.filter(r => !r._deleted);
                 const recurringRows = activeRows.filter(r => r.recurring);
                 if (recurringRows.length > 0) {
@@ -1126,16 +1136,48 @@ export default function App() {
                         batch_id: batchId,
                       };
                     });
-                  const { error: rErr } = await supabase.from("recurring_transactions").insert(recurringTemplates);
-                  if (!rErr) {
-                    const { data: freshRecur } = await supabase.from("recurring_transactions")
-                      .select("*").eq("business_id", business.id).eq("active", true).order("next_due_date");
-                    if (freshRecur) setRecurring(freshRecur);
+
+                  // Try insert with batch_id; if that column is missing, retry without it
+                  let { error: rErr } = await supabase.from("recurring_transactions").insert(recurringTemplates);
+                  if (rErr && rErr.message && rErr.message.includes("batch_id")) {
+                    const withoutBatch = recurringTemplates.map(({ batch_id, ...rest }) => rest);
+                    const { error: rErr2 } = await supabase.from("recurring_transactions").insert(withoutBatch);
+                    if (rErr2) console.error("Recurring insert failed:", rErr2.message);
+                  } else if (rErr) {
+                    console.error("Recurring insert failed:", rErr.message);
                   }
+
+                  // Always refresh recurring state regardless of batch_id errors
+                  const { data: freshRecur } = await supabase.from("recurring_transactions")
+                    .select("*").eq("business_id", business.id).eq("active", true).order("next_due_date");
+                  if (freshRecur) setRecurring(freshRecur);
                 }
 
                 setImportDoneCount(inserted.length);
-                setImportStep("done");
+
+                // ── Post-import duplicate detection ──────────────────────────
+                const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+                const dupes = [];
+                (inserted || []).forEach(newTx => {
+                  prevTransactions.forEach(ex => {
+                    if ((ex.description || "").toLowerCase().trim() !== (newTx.description || "").toLowerCase().trim()) return;
+                    if (Math.abs(Math.abs(ex.amount) - Math.abs(newTx.amount)) > 0.01) return;
+                    const diff = Math.abs(
+                      new Date(ex.transaction_date + "T12:00:00") - new Date(newTx.transaction_date + "T12:00:00")
+                    );
+                    if (diff > THREE_DAYS_MS) return;
+                    if (!dupes.some(d => d.existing.id === ex.id && d.imported.id === newTx.id)) {
+                      dupes.push({ existing: ex, imported: newTx });
+                    }
+                  });
+                });
+
+                if (dupes.length > 0) {
+                  setImportDuplicates(dupes);
+                  setImportStep("duplicates");
+                } else {
+                  setImportStep("done");
+                }
               }
 
               function resetImport() {
@@ -1147,6 +1189,7 @@ export default function App() {
                 setImportPasteText("");
                 setImportDragging(false);
                 setImportFileName("");
+                setImportDuplicates([]);
               }
 
               function updateRow(id, field, value) {
@@ -1162,6 +1205,60 @@ export default function App() {
               function excludeTransfer(id) {
                 setImportRows(prev => prev.map(r => r._id === id ? { ...r, _deleted: true } : r));
               }
+
+              // ── Step: duplicates ─────────────────────────────────────────
+              if (importStep === "duplicates") return (
+                <div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>REVIEW POSSIBLE DUPLICATES</div>
+                  <div style={{ background: "#1c1200", border: "1px solid #d97706", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#d97706", lineHeight: 1.6 }}>
+                    ⚠️ {importDuplicates.length} possible duplicate{importDuplicates.length !== 1 ? "s" : ""} found — same description and amount within 3 days of an existing record. Choose what to keep for each one.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                    {importDuplicates.map(({ existing, imported }, idx) => (
+                      <div key={idx} style={{ background: "#0f1117", border: "1px solid #d97706", borderRadius: 12, padding: 14 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                          <div style={{ background: "#080b12", border: "1px solid #1e2235", borderRadius: 8, padding: 10 }}>
+                            <div style={{ fontSize: 10, color: "#4b5563", marginBottom: 6, fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>EXISTING</div>
+                            <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginBottom: 4, wordBreak: "break-word" }}>{existing.description}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: existing.amount >= 0 ? "#4ade80" : "#f87171" }}>{fmt(existing.amount)}</div>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{existing.transaction_date}</div>
+                          </div>
+                          <div style={{ background: "#080b12", border: "1px solid #1e3a5f", borderRadius: 8, padding: 10 }}>
+                            <div style={{ fontSize: 10, color: "#1d4ed8", marginBottom: 6, fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>JUST IMPORTED</div>
+                            <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginBottom: 4, wordBreak: "break-word" }}>{imported.description}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: imported.amount >= 0 ? "#4ade80" : "#f87171" }}>{fmt(imported.amount)}</div>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{imported.transaction_date}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                          <button onClick={() => setImportDuplicates(prev => prev.filter((_, i) => i !== idx))}
+                            style={{ background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 8, padding: "9px 0", color: "#4ade80", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                            Keep Both
+                          </button>
+                          <button onClick={async () => {
+                            await supabase.from("transactions").delete().eq("id", imported.id);
+                            setTransactions(prev => prev.filter(t => t.id !== imported.id));
+                            setImportDuplicates(prev => prev.filter((_, i) => i !== idx));
+                          }} style={{ background: "#1a1535", border: "1px solid #7c3aed", borderRadius: 8, padding: "9px 0", color: "#c4b5fd", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                            Delete Import
+                          </button>
+                          <button onClick={async () => {
+                            await supabase.from("transactions").delete().eq("id", existing.id);
+                            setTransactions(prev => prev.filter(t => t.id !== existing.id));
+                            setImportDuplicates(prev => prev.filter((_, i) => i !== idx));
+                          }} style={{ background: "#2d1515", border: "1px solid #7f1d1d", borderRadius: 8, padding: "9px 0", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                            Delete Original
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { setImportDuplicates([]); setImportStep("done"); }}
+                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1e2235", color: "#94a3b8", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+                    Skip All & Continue →
+                  </button>
+                </div>
+              );
 
               // ── Step: done ───────────────────────────────────────────────
               if (importStep === "done") return (
