@@ -370,6 +370,16 @@ export default function App() {
   const [importFileName, setImportFileName] = useState("");
   const [showImportBatches, setShowImportBatches] = useState(false);
 
+  // Transaction filter/sort state
+  const [txSort, setTxSort] = useState("date-desc");
+  const [txFilterType, setTxFilterType] = useState("all");
+  const [txFilterCat, setTxFilterCat] = useState("all");
+
+  // Recurring filter state
+  const [recurFilterProp, setRecurFilterProp] = useState("all");
+  const [recurFilterType, setRecurFilterType] = useState("all");
+  const [recurFilterFreq, setRecurFilterFreq] = useState("all");
+
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
     background: "#1e2235", border: "1px solid #2d3555",
@@ -580,6 +590,24 @@ export default function App() {
       },
     })).sort((a, b) => b.importedAt.localeCompare(a.importedAt));
   }, [transactions]);
+
+  const displayTxs = useMemo(() => {
+    let rows = filterProp === "all" ? [...transactions] : transactions.filter(t => t.property_id === filterProp);
+    if (txFilterType !== "all") rows = rows.filter(t => t.type === txFilterType);
+    if (txFilterCat !== "all") rows = rows.filter(t => (t.category || "") === txFilterCat);
+    if (txSort === "date-desc") rows.reverse();
+    else if (txSort === "amount-desc") rows.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    else if (txSort === "amount-asc") rows.sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
+    return rows;
+  }, [transactions, filterProp, txSort, txFilterType, txFilterCat]);
+
+  const displayRecurring = useMemo(() => {
+    let rows = [...recurring];
+    if (recurFilterProp !== "all") rows = rows.filter(r => r.property_id === recurFilterProp);
+    if (recurFilterType !== "all") rows = rows.filter(r => r.type === recurFilterType);
+    if (recurFilterFreq !== "all") rows = rows.filter(r => r.frequency === recurFilterFreq);
+    return rows;
+  }, [recurring, recurFilterProp, recurFilterType, recurFilterFreq]);
 
   const tabs = [
     { id: "dashboard", label: "Dashboard" },
@@ -793,6 +821,28 @@ export default function App() {
                   <button onClick={() => setShowAddForm(v => !v)} style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "12px 16px", color: "#fff", cursor: "pointer", fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>+ Add</button>
                 </div>
 
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                  <select value={txSort} onChange={e => setTxSort(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 120, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="date-desc">Newest First</option>
+                    <option value="date-asc">Oldest First</option>
+                    <option value="amount-desc">Largest First</option>
+                    <option value="amount-asc">Smallest First</option>
+                  </select>
+                  <select value={txFilterType} onChange={e => setTxFilterType(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 100, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="all">All Types</option>
+                    <option value="income">Income Only</option>
+                    <option value="expense">Expenses Only</option>
+                  </select>
+                  <select value={txFilterCat} onChange={e => setTxFilterCat(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 130, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="all">All Categories</option>
+                    <option value="Income / Rent">Income / Rent</option>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
                 {filterProp !== "all" && (
                   <button onClick={() => { const prop = properties.find(p => p.id === filterProp); if (prop) printProperty(prop, transactions); }}
                     style={{ width: "100%", marginBottom: 12, background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 10, padding: "10px 0", color: "#4ade80", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
@@ -800,11 +850,11 @@ export default function App() {
                   </button>
                 )}
 
-                {filtered.length > 0 && (
+                {displayTxs.length > 0 && (
                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
-                    <button onClick={() => setSelectedTxIds(selectedTxIds.length === filtered.length ? [] : filtered.map(t => t.id))}
+                    <button onClick={() => setSelectedTxIds(selectedTxIds.length === displayTxs.length ? [] : displayTxs.map(t => t.id))}
                       style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "8px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>
-                      {selectedTxIds.length === filtered.length ? "Deselect All" : "Select All"}
+                      {selectedTxIds.length === displayTxs.length ? "Deselect All" : "Select All"}
                     </button>
                     {selectedTxIds.length > 0 && (
                       <button onClick={async () => {
@@ -877,7 +927,7 @@ export default function App() {
                 )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {[...filtered].reverse().map((tx) => {
+                  {displayTxs.map((tx) => {
                     const isSelected = selectedTxIds.includes(tx.id);
                     return (
                       <div key={tx.id} onClick={() => setSelectedTxIds(prev => isSelected ? prev.filter(id => id !== tx.id) : [...prev, tx.id])}
@@ -904,7 +954,11 @@ export default function App() {
                       </div>
                     );
                   })}
-                  {filtered.length === 0 && <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>No transactions yet.</div>}
+                  {displayTxs.length === 0 && (
+                    <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>
+                      {transactions.length === 0 ? "No transactions yet." : "No transactions match these filters."}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -962,7 +1016,7 @@ export default function App() {
                   if (!res.ok || data.error) { setImportError(data.error || "Parsing failed."); setImportParsing(false); return; }
                   if (data.warning) setImportError(data.warning); // non-fatal: show as yellow-ish notice
 
-                  const rows = data.transactions.map((t, i) => ({
+                  let rows = data.transactions.map((t, i) => ({
                     ...t,
                     _id: i,
                     _transfer: t.type === "transfer",
@@ -974,6 +1028,34 @@ export default function App() {
                       (ex.description || "").toLowerCase() === (t.description || "").toLowerCase()
                     ),
                   }));
+
+                  // Smart recurring detection: cross-reference with existing transactions
+                  // If the same description appears in 2+ calendar months (existing + imported)
+                  // with a consistent day-of-month (±5 days), flag it recurring.
+                  const descMap = {};
+                  [...transactions, ...rows].forEach(t => {
+                    const key = (t.description || "").toLowerCase().trim();
+                    if (!descMap[key]) descMap[key] = [];
+                    descMap[key].push(t);
+                  });
+                  rows = rows.map(r => {
+                    if (r._transfer || r.recurring) return r; // already classified
+                    const key = (r.description || "").toLowerCase().trim();
+                    const group = descMap[key] || [];
+                    if (group.length < 2) return r;
+                    const months = new Set(group.map(t => (t.transaction_date || "").slice(0, 7)).filter(Boolean));
+                    if (months.size < 2) return r;
+                    const days = group.map(t => {
+                      const d = new Date((t.transaction_date || "") + "T12:00:00");
+                      return isNaN(d) ? -1 : d.getDate();
+                    }).filter(d => d >= 1);
+                    const avgDay = Math.round(days.reduce((a, b) => a + b, 0) / days.length);
+                    if (days.every(d => Math.abs(d - avgDay) <= 5)) {
+                      return { ...r, recurring: true, guessedFrequency: "monthly" };
+                    }
+                    return r;
+                  });
+
                   setImportRows(rows);
                   setImportStep("preview");
                 } catch (e) {
@@ -1004,6 +1086,53 @@ export default function App() {
                 const { data: inserted, error } = await supabase.from("transactions").insert(toInsert).select();
                 if (error) { setImportError("Import failed: " + error.message); return; }
                 setTransactions(prev => [...prev, ...inserted]);
+
+                // Insert recurring templates for rows the user flagged as recurring
+                const activeRows = importRows.filter(r => !r._deleted);
+                const recurringRows = activeRows.filter(r => r.recurring);
+                if (recurringRows.length > 0) {
+                  const seen = new Set();
+                  const recurringTemplates = recurringRows
+                    .filter(r => {
+                      const key = (r.description || "").toLowerCase().trim() + "|" + (r.guessedFrequency || "monthly");
+                      if (seen.has(key)) return false;
+                      seen.add(key); return true;
+                    })
+                    .map(r => {
+                      const resolvedType = r.type === "transfer" ? (r.amount > 0 ? "income" : "expense") : r.type;
+                      const resolvedAmt = resolvedType === "expense" ? -Math.abs(r.amount) : Math.abs(r.amount);
+                      const freq = r.guessedFrequency || "monthly";
+                      const base = new Date(r.transaction_date + "T12:00:00");
+                      const dom = base.getDate();
+                      const next = new Date(base);
+                      if (freq === "monthly") next.setMonth(next.getMonth() + 1);
+                      else if (freq === "weekly") next.setDate(next.getDate() + 7);
+                      else next.setFullYear(next.getFullYear() + 1);
+                      const today = new Date();
+                      if (freq === "monthly") { while (next <= today) next.setMonth(next.getMonth() + 1); }
+                      else if (freq === "weekly") { while (next <= today) next.setDate(next.getDate() + 7); }
+                      else { while (next <= today) next.setFullYear(next.getFullYear() + 1); }
+                      return {
+                        business_id: business.id,
+                        property_id: r.property_id || null,
+                        description: r.description,
+                        amount: resolvedAmt,
+                        type: resolvedType,
+                        category: r.category || null,
+                        frequency: freq,
+                        day_of_month: dom,
+                        next_due_date: next.toISOString().slice(0, 10),
+                        active: true,
+                      };
+                    });
+                  const { error: rErr } = await supabase.from("recurring_transactions").insert(recurringTemplates);
+                  if (!rErr) {
+                    const { data: freshRecur } = await supabase.from("recurring_transactions")
+                      .select("*").eq("business_id", business.id).eq("active", true).order("next_due_date");
+                    if (freshRecur) setRecurring(freshRecur);
+                  }
+                }
+
                 setImportDoneCount(inserted.length);
                 setImportStep("done");
               }
@@ -1139,9 +1268,25 @@ export default function App() {
                         {row.isDuplicate && (
                           <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>⚠ POSSIBLE DUPLICATE</div>
                         )}
-                        {row.recurring && (
-                          <div style={{ fontSize: 11, color: "#818cf8", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>↻ RECURRING</div>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                            <input type="checkbox" checked={!!row.recurring}
+                              onChange={e => updateRow(row._id, "recurring", e.target.checked)}
+                              style={{ accentColor: "#818cf8", cursor: "pointer", width: 14, height: 14 }} />
+                            <span style={{ fontSize: 11, color: row.recurring ? "#818cf8" : "#475569", fontFamily: "'Courier New', monospace" }}>
+                              RECURRING{row.recurring ? " — adds to schedule" : ""}
+                            </span>
+                          </label>
+                          {row.recurring && (
+                            <select value={row.guessedFrequency || "monthly"}
+                              onChange={e => updateRow(row._id, "guessedFrequency", e.target.value)}
+                              style={{ ...inputStyle, fontSize: 11, padding: "3px 7px", width: "auto" }}>
+                              <option value="monthly">Monthly</option>
+                              <option value="weekly">Weekly</option>
+                              <option value="yearly">Yearly</option>
+                            </select>
+                          )}
+                        </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                           <input type="date" value={row.transaction_date}
                             onChange={e => updateRow(row._id, "transaction_date", e.target.value)}
@@ -1363,12 +1508,33 @@ export default function App() {
             {/* RECURRING */}
             {activeTab === "recurring" && (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>RECURRING TRANSACTIONS</div>
                   <button onClick={() => { setEditingRecurring(null); setRecurringForm({ property_id: properties[0]?.id || "", description: "", amount: "", type: "income", category: "", frequency: "monthly", day_of_month: 1, next_due_date: "", end_date: "" }); setShowRecurringForm(true); }}
                     style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "10px 16px", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
                     + Add Recurring
                   </button>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  <select value={recurFilterProp} onChange={e => setRecurFilterProp(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 120, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="all">All Properties</option>
+                    {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <select value={recurFilterType} onChange={e => setRecurFilterType(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 110, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="all">All Types</option>
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                  <select value={recurFilterFreq} onChange={e => setRecurFilterFreq(e.target.value)}
+                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 110, fontSize: 13, padding: "8px 10px" }}>
+                    <option value="all">All Frequencies</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
                 </div>
 
                 {showRecurringForm && (
@@ -1439,8 +1605,12 @@ export default function App() {
                 )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {recurring.length === 0 && <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>No recurring transactions set up yet.</div>}
-                  {recurring.map(r => (
+                  {displayRecurring.length === 0 && (
+                    <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>
+                      {recurring.length === 0 ? "No recurring transactions set up yet." : "No recurring transactions match these filters."}
+                    </div>
+                  )}
+                  {displayRecurring.map(r => (
                     <div key={r.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "14px 16px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                         <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, flex: 1, marginRight: 12 }}>{r.description}</div>
