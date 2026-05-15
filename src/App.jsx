@@ -852,7 +852,7 @@ export default function App() {
               const isPro = subscription?.status === "pro";
               const existingImported = transactions.filter(t => t.source === "import").length;
               const FREE_LIMIT = 50;
-              const PRO_WARN_LIMIT = 500;
+              const PRO_WARN_LIMIT = 300;
 
               // Count pro user's imports this calendar month
               const thisMonthImported = (() => {
@@ -997,7 +997,7 @@ export default function App() {
                   {proMonthWarning && (
                     <div style={{ background: "#1a1a2e", border: "1px solid #a78bfa", borderRadius: 12, padding: 14, marginBottom: 16 }}>
                       <div style={{ fontSize: 13, color: "#c4b5fd" }}>
-                        ⚠️ Large import: you've imported {thisMonthImported + activeImportRows.length} transactions this month. Very large imports may incur additional fees on future paid tiers.
+                        ⚠️ Large import detected ({activeImportRows.length} transactions). Imports over {PRO_WARN_LIMIT} rows use additional AI processing and a $1.00 overage fee will be charged to your account. You can proceed or reduce the date range.
                       </div>
                     </div>
                   )}

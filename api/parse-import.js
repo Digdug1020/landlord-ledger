@@ -5,7 +5,8 @@ const CATEGORIES = [
   "Utilities", "Labor", "Equipment", "Platform Fees", "Other",
 ];
 
-const MAX_INPUT_CHARS = 400000; // ~100k tokens — well within Haiku's context
+const MAX_BYTES = 51200;  // 50 KB
+const MAX_LINES = 500;
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -14,9 +15,15 @@ module.exports = async function handler(req, res) {
   if (!text || text.trim().length === 0) {
     return res.status(400).json({ error: 'No data provided.' });
   }
-  if (text.length > MAX_INPUT_CHARS) {
-    return res.status(400).json({ error: 'File is too large. Split it into smaller files and import each separately.' });
+
+  // Size guard — enforced before sending anything to Claude
+  const lineCount = text.split('\n').filter(l => l.trim().length > 0).length;
+  if (text.length > MAX_BYTES || lineCount > MAX_LINES) {
+    return res.status(400).json({
+      error: 'This file is too large. Try uploading 1–2 months at a time to keep processing fast and costs low.',
+    });
   }
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: 'AI parsing is not configured on this server.' });
   }
@@ -50,6 +57,8 @@ ${text}`;
       messages: [{ role: 'user', content: prompt }],
     });
 
+    const wasTruncated = message.stop_reason === 'max_tokens';
+
     // Strip markdown code fences that Claude Haiku adds despite instructions
     const raw = message.content[0].text
       .trim()
@@ -59,33 +68,32 @@ ${text}`;
       .trim();
 
     // Try multiple strategies to extract a JSON array from the model response.
-    // Claude occasionally adds explanation text or wraps the array in an object.
-    function extractArray(text) {
+    function extractArray(t) {
       // 1. Bare valid JSON
       try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) return parsed;
-        if (parsed && Array.isArray(parsed.transactions)) return parsed.transactions;
+        const p = JSON.parse(t);
+        if (Array.isArray(p)) return p;
+        if (p && Array.isArray(p.transactions)) return p.transactions;
       } catch {}
 
-      // 2. Slice from first [ to last ] to strip surrounding prose / fences
-      const aStart = text.indexOf('[');
-      const aEnd   = text.lastIndexOf(']');
+      // 2. Slice from first [ to last ]
+      const aStart = t.indexOf('[');
+      const aEnd   = t.lastIndexOf(']');
       if (aStart !== -1 && aEnd > aStart) {
         try {
-          const parsed = JSON.parse(text.slice(aStart, aEnd + 1));
-          if (Array.isArray(parsed)) return parsed;
+          const p = JSON.parse(t.slice(aStart, aEnd + 1));
+          if (Array.isArray(p)) return p;
         } catch {}
       }
 
       // 3. Slice from first { to last } (model wrapped in an object)
-      const oStart = text.indexOf('{');
-      const oEnd   = text.lastIndexOf('}');
+      const oStart = t.indexOf('{');
+      const oEnd   = t.lastIndexOf('}');
       if (oStart !== -1 && oEnd > oStart) {
         try {
-          const parsed = JSON.parse(text.slice(oStart, oEnd + 1));
-          if (Array.isArray(parsed)) return parsed;
-          if (parsed && Array.isArray(parsed.transactions)) return parsed.transactions;
+          const p = JSON.parse(t.slice(oStart, oEnd + 1));
+          if (Array.isArray(p)) return p;
+          if (p && Array.isArray(p.transactions)) return p.transactions;
         } catch {}
       }
 
@@ -93,12 +101,16 @@ ${text}`;
     }
 
     const transactions = extractArray(raw);
+
     if (!transactions) {
-      console.error('parse-import: all extraction strategies failed. Raw response (800 chars):', raw.slice(0, 800));
-      return res.status(500).json({ error: 'AI returned an unexpected format. Please try again.' });
+      console.error('parse-import: all extraction strategies failed. stop_reason:', message.stop_reason, '| raw (800):', raw.slice(0, 800));
+      const error = wasTruncated
+        ? 'Import partially processed — try a smaller date range for complete results.'
+        : 'AI returned an unexpected format. Please try again.';
+      return res.status(500).json({ error });
     }
 
-    // Sanitise each row so bad AI output doesn't reach the client
+    // Sanitise each row
     const clean = transactions.map(t => ({
       transaction_date: typeof t.transaction_date === 'string' ? t.transaction_date : new Date().toISOString().slice(0, 10),
       description:      String(t.description || '').slice(0, 120),
@@ -106,7 +118,7 @@ ${text}`;
       type:             t.type === 'income' ? 'income' : 'expense',
       category:         [...CATEGORIES, 'Income / Rent'].includes(t.category) ? t.category : 'Other',
       recurring:        Boolean(t.recurring),
-    })).filter(t => t.amount !== 0); // drop zero-amount rows
+    })).filter(t => t.amount !== 0);
 
     return res.status(200).json({ transactions: clean });
   } catch (err) {
