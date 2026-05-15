@@ -5,8 +5,8 @@ const CATEGORIES = [
   "Utilities", "Labor", "Equipment", "Platform Fees", "Other",
 ];
 
-const MAX_BYTES = 512000;  // 500 KB
-const MAX_LINES = 2000;
+const MAX_BYTES  = 512000; // 500 KB hard cap
+const CHUNK_SIZE = 200;    // lines sent to Claude per request
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -15,22 +15,34 @@ module.exports = async function handler(req, res) {
   if (!text || text.trim().length === 0) {
     return res.status(400).json({ error: 'No data provided.' });
   }
-
-  // Size guard — enforced before sending anything to Claude
-  const lineCount = text.split('\n').filter(l => l.trim().length > 0).length;
-  if (text.length > MAX_BYTES || lineCount > MAX_LINES) {
+  if (text.length > MAX_BYTES) {
     return res.status(400).json({
       error: 'This file is too large. Try uploading 1–2 months at a time to keep processing fast and costs low.',
     });
   }
-
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: 'AI parsing is not configured on this server.' });
   }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const prompt = `You are a financial data parser for a property management application. Parse the data below and extract every transaction record.
+  // Keep header row to prepend to every chunk so Claude knows column names
+  const allLines  = text.split('\n').filter(l => l.trim().length > 0);
+  const header    = allLines[0] || '';
+  const dataLines = allLines.slice(1);
+
+  // Split data rows into CHUNK_SIZE chunks
+  const chunks = [];
+  if (dataLines.length === 0) {
+    chunks.push([]); // single empty chunk — Claude will return []
+  } else {
+    for (let i = 0; i < dataLines.length; i += CHUNK_SIZE) {
+      chunks.push(dataLines.slice(i, i + CHUNK_SIZE));
+    }
+  }
+
+  function buildPrompt(chunkText) {
+    return `You are a financial data parser for a property management application. Parse the data below and extract every transaction record.
 
 Return ONLY a valid JSON array — no markdown, no explanation, no code fences. Each element must have exactly these fields:
 - "transaction_date": string, YYYY-MM-DD format
@@ -42,24 +54,60 @@ Return ONLY a valid JSON array — no markdown, no explanation, no code fences. 
 
 Rules:
 - SKIP header rows, blank rows, total/subtotal rows, balance rows, and any row with no dollar amount
-- Infer income vs expense from context: deposits, rent received, credits → income (positive); payments, charges, fees → expense (negative)
+- If separate Debit and Credit columns exist: Debit value = expense (negative amount), Credit value = income (positive amount)
+- Use "Post Date" as the transaction date when present; otherwise use the first date-like column
+- Ignore columns like Account Number, Check Number, Status, Balance
 - "Income / Rent" category: use for rent payments, rental income, tenant payments
 - If a date cannot be determined, use today's date: ${new Date().toISOString().slice(0, 10)}
 - Only return the JSON array. Do not include anything else.
 
 Data:
-${text}`;
+${chunkText}`;
+  }
 
-  try {
+  // Extract a JSON array from Claude's response using multiple strategies
+  function extractArray(t) {
+    // 1. Bare valid JSON
+    try {
+      const p = JSON.parse(t);
+      if (Array.isArray(p)) return p;
+      if (p && Array.isArray(p.transactions)) return p.transactions;
+    } catch {}
+
+    // 2. Slice from first [ to last ]
+    const aStart = t.indexOf('[');
+    const aEnd   = t.lastIndexOf(']');
+    if (aStart !== -1 && aEnd > aStart) {
+      try {
+        const p = JSON.parse(t.slice(aStart, aEnd + 1));
+        if (Array.isArray(p)) return p;
+      } catch {}
+    }
+
+    // 3. Slice from first { to last } (model wrapped in an object)
+    const oStart = t.indexOf('{');
+    const oEnd   = t.lastIndexOf('}');
+    if (oStart !== -1 && oEnd > oStart) {
+      try {
+        const p = JSON.parse(t.slice(oStart, oEnd + 1));
+        if (Array.isArray(p)) return p;
+        if (p && Array.isArray(p.transactions)) return p.transactions;
+      } catch {}
+    }
+
+    return null;
+  }
+
+  async function processChunk(chunkLines) {
+    const chunkText = [header, ...chunkLines].join('\n');
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 8192,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: buildPrompt(chunkText) }],
     });
 
     const wasTruncated = message.stop_reason === 'max_tokens';
 
-    // Strip markdown code fences that Claude Haiku adds despite instructions
     const raw = message.content[0].text
       .trim()
       .replace(/^```json\s*/i, '')
@@ -67,51 +115,38 @@ ${text}`;
       .replace(/\s*```$/i, '')
       .trim();
 
-    // Try multiple strategies to extract a JSON array from the model response.
-    function extractArray(t) {
-      // 1. Bare valid JSON
+    const result = extractArray(raw);
+    if (!result) {
+      console.error('parse-import chunk failed. stop_reason:', message.stop_reason, '| raw (800):', raw.slice(0, 800));
+      throw Object.assign(new Error('extraction failed'), { truncated: wasTruncated });
+    }
+    return result;
+  }
+
+  try {
+    const allTransactions = [];
+    let hadError = false;
+
+    for (let i = 0; i < chunks.length; i++) {
       try {
-        const p = JSON.parse(t);
-        if (Array.isArray(p)) return p;
-        if (p && Array.isArray(p.transactions)) return p.transactions;
-      } catch {}
-
-      // 2. Slice from first [ to last ]
-      const aStart = t.indexOf('[');
-      const aEnd   = t.lastIndexOf(']');
-      if (aStart !== -1 && aEnd > aStart) {
-        try {
-          const p = JSON.parse(t.slice(aStart, aEnd + 1));
-          if (Array.isArray(p)) return p;
-        } catch {}
+        const txs = await processChunk(chunks[i]);
+        allTransactions.push(...txs);
+      } catch (err) {
+        hadError = true;
+        console.error(`parse-import: chunk ${i + 1}/${chunks.length} failed —`, err.message);
+        // If the very first chunk fails with nothing collected, surface an error
+        if (i === 0 && allTransactions.length === 0) {
+          const msg = err.truncated
+            ? 'Import partially processed — try a smaller date range for complete results.'
+            : 'AI returned an unexpected format. Please try again.';
+          return res.status(500).json({ error: msg });
+        }
+        // Otherwise skip the failed chunk and continue with what we have
       }
-
-      // 3. Slice from first { to last } (model wrapped in an object)
-      const oStart = t.indexOf('{');
-      const oEnd   = t.lastIndexOf('}');
-      if (oStart !== -1 && oEnd > oStart) {
-        try {
-          const p = JSON.parse(t.slice(oStart, oEnd + 1));
-          if (Array.isArray(p)) return p;
-          if (p && Array.isArray(p.transactions)) return p.transactions;
-        } catch {}
-      }
-
-      return null;
     }
 
-    const transactions = extractArray(raw);
-
-    if (!transactions) {
-      console.error('parse-import: all extraction strategies failed. stop_reason:', message.stop_reason, '| raw (800):', raw.slice(0, 800));
-      const error = wasTruncated
-        ? 'Import partially processed — try a smaller date range for complete results.'
-        : 'AI returned an unexpected format. Please try again.';
-      return res.status(500).json({ error });
-    }
-
-    // Sanitise each row
-    const clean = transactions.map(t => ({
+    // Sanitise all collected rows
+    const clean = allTransactions.map(t => ({
       transaction_date: typeof t.transaction_date === 'string' ? t.transaction_date : new Date().toISOString().slice(0, 10),
       description:      String(t.description || '').slice(0, 120),
       amount:           Number(t.amount) || 0,
@@ -120,7 +155,11 @@ ${text}`;
       recurring:        Boolean(t.recurring),
     })).filter(t => t.amount !== 0);
 
-    return res.status(200).json({ transactions: clean });
+    return res.status(200).json({
+      transactions: clean,
+      // Let the client know if some chunks were skipped
+      ...(hadError && { warning: 'Some rows could not be parsed and were skipped.' }),
+    });
   } catch (err) {
     console.error('parse-import error:', err.message);
     return res.status(500).json({ error: 'AI parsing failed. Please try again.' });

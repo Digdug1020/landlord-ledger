@@ -897,6 +897,7 @@ export default function App() {
                   });
                   const data = await res.json();
                   if (!res.ok || data.error) { setImportError(data.error || "Parsing failed."); setImportParsing(false); return; }
+                  if (data.warning) setImportError(data.warning); // non-fatal: show as yellow-ish notice
 
                   const rows = data.transactions.map((t, i) => ({
                     ...t,
