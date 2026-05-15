@@ -652,6 +652,7 @@ export default function App() {
     <div style={{ minHeight: "100vh", width: "100%", background: "#080b12", color: "#e2e8f0", fontFamily: "Georgia, serif", overflowX: "hidden" }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
+        @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; }
         input::placeholder { color: #94a3b8 !important; }
         select option { background: #0f1117; }
@@ -659,6 +660,17 @@ export default function App() {
         ::-webkit-scrollbar-track { background: #080b12; }
         ::-webkit-scrollbar-thumb { background: #1e2235; border-radius: 2px; }
       `}</style>
+
+      {/* AI parsing overlay — blocks all interaction while Claude processes */}
+      {importParsing && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(8,11,18,0.85)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "all" }}>
+          <div style={{ background: "#0f1117", border: "1px solid #2d3555", borderRadius: 18, padding: "36px 32px", maxWidth: 340, width: "90%", textAlign: "center" }}>
+            <div style={{ width: 48, height: 48, border: "4px solid #1e2235", borderTop: "4px solid #3b82f6", borderRadius: "50%", animation: "spin 0.9s linear infinite", margin: "0 auto 20px" }} />
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#e2e8f0", marginBottom: 10 }}>Processing your file with AI…</div>
+            <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>This may take 30–60 seconds.<br />Please do not close this page or upload another file.</div>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ background: "#0a0d16", borderBottom: "1px solid #1e2235", padding: "16px 16px 0", position: "sticky", top: 0, zIndex: 100 }}>
