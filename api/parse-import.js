@@ -50,11 +50,16 @@ ${text}`;
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const raw = message.content[0].text.trim();
+    // Strip markdown code fences that Claude Haiku adds despite instructions
+    const raw = message.content[0].text
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
 
     // Try multiple strategies to extract a JSON array from the model response.
-    // Claude occasionally adds explanation text, code fences, or wraps the
-    // array in an object — handle all of these gracefully.
+    // Claude occasionally adds explanation text or wraps the array in an object.
     function extractArray(text) {
       // 1. Bare valid JSON
       try {
