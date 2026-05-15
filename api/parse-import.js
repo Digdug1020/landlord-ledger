@@ -6,7 +6,7 @@ const CATEGORIES = [
 ];
 
 const MAX_BYTES  = 512000; // 500 KB hard cap
-const CHUNK_SIZE = 200;    // lines sent to Claude per request
+const CHUNK_SIZE = 100;    // lines sent to Claude per request
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -97,9 +97,12 @@ Return ONLY a valid JSON array — no markdown, no explanation, no code fences. 
 
 Rules:
 - SKIP header rows, blank rows, total/subtotal rows, balance rows, and any row with no dollar amount
-- If separate Debit and Credit columns exist: Debit value = expense (negative amount), Credit value = income (positive amount)
+- If separate Debit and Credit columns exist:
+    * Credit column has a value → type: "income", amount: POSITIVE (e.g. Credit=100.00 → amount: 100)
+    * Debit column has a value → type: "expense", amount: NEGATIVE (e.g. Debit=50.00 → amount: -50)
+    * Never invert this — a Cash App or Venmo credit is income, not an expense
 - Use "Post Date" as the transaction date when present; otherwise use the first date-like column
-- Ignore columns like Account Number, Check Number, Status, Balance
+- Ignore columns like Status, Balance
 - "Income / Rent" category: use for rent payments, rental income, tenant payments
 - If a date cannot be determined, use today's date: ${new Date().toISOString().slice(0, 10)}
 - Only return the JSON array. Do not include anything else.
