@@ -63,7 +63,7 @@ function LoginScreen() {
     Object.keys(localStorage).filter(k => k.startsWith('supabase')).forEach(k => localStorage.removeItem(k));
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: "https://www.landlord-ledger.app" }
+      options: { redirectTo: window.location.origin }
     });
     if (error) { setError(error.message); setLoading(false); }
   }
