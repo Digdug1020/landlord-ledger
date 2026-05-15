@@ -997,7 +997,7 @@ export default function App() {
                   {proMonthWarning && (
                     <div style={{ background: "#1a1a2e", border: "1px solid #a78bfa", borderRadius: 12, padding: 14, marginBottom: 16 }}>
                       <div style={{ fontSize: 13, color: "#c4b5fd" }}>
-                        ⚠️ Large import detected ({activeImportRows.length} transactions). Imports over {PRO_WARN_LIMIT} rows use additional AI processing and a $1.00 overage fee will be charged to your account. You can proceed or reduce the date range.
+                        ⚠️ Large import ({activeImportRows.length} transactions). For best results, consider splitting into smaller date ranges.
                       </div>
                     </div>
                   )}
