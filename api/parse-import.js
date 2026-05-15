@@ -5,8 +5,8 @@ const CATEGORIES = [
   "Utilities", "Labor", "Equipment", "Platform Fees", "Other",
 ];
 
-const MAX_BYTES = 51200;  // 50 KB
-const MAX_LINES = 500;
+const MAX_BYTES = 512000;  // 500 KB
+const MAX_LINES = 2000;
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
