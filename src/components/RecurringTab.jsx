@@ -142,7 +142,14 @@ export default function RecurringTab() {
           <div key={r.id} style={{ background: '#0f1117', border: '1px solid #1e2235', borderRadius: 12, padding: '14px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
               <div style={{ fontSize: 15, color: '#e2e8f0', fontWeight: 600, flex: 1, marginRight: 12 }}>{r.description}</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: r.amount >= 0 ? '#4ade80' : '#f87171', whiteSpace: 'nowrap' }}>{fmt(r.amount)}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: r.amount >= 0 ? '#4ade80' : '#f87171', whiteSpace: 'nowrap' }}>{fmt(r.amount)}</div>
+                <button onClick={async () => {
+                  if (!window.confirm(`Delete "${r.description}" permanently? This cannot be undone.`)) return;
+                  const { error } = await supabase.from('recurring_transactions').delete().eq('id', r.id);
+                  if (!error) setRecurring(prev => prev.filter(x => x.id !== r.id));
+                }} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: '0 4px' }} title="Delete">✕</button>
+              </div>
             </div>
             <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>{r.property_id ? properties.find(p => p.id === r.property_id)?.name : 'All Properties'}</div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10, fontFamily: "'Courier New', monospace" }}>
@@ -173,11 +180,6 @@ export default function RecurringTab() {
                 await supabase.from('recurring_transactions').update({ active: false }).eq('id', r.id);
                 setRecurring(prev => prev.filter(x => x.id !== r.id));
               }} style={{ background: '#1e2235', border: '1px solid #7f1d1d', borderRadius: 8, padding: '6px 14px', color: '#f87171', cursor: 'pointer', fontSize: 12 }}>Stop</button>
-              <button onClick={async () => {
-                if (!window.confirm(`Delete "${r.description}" permanently? This cannot be undone.`)) return;
-                const { error } = await supabase.from('recurring_transactions').delete().eq('id', r.id);
-                if (!error) setRecurring(prev => prev.filter(x => x.id !== r.id));
-              }} style={{ background: '#2d0a0a', border: '1px solid #7f1d1d', borderRadius: 8, padding: '6px 10px', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✕</button>
             </div>
           </div>
         ))}
