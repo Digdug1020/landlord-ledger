@@ -63,7 +63,7 @@ function LoginScreen() {
     Object.keys(localStorage).filter(k => k.startsWith('supabase')).forEach(k => localStorage.removeItem(k));
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: "https://www.landlord-ledger.app" }
+      options: { redirectTo: window.location.origin }
     });
     if (error) { setError(error.message); setLoading(false); }
   }
@@ -380,6 +380,14 @@ export default function App() {
   const [recurFilterProp, setRecurFilterProp] = useState("all");
   const [recurFilterType, setRecurFilterType] = useState("all");
   const [recurFilterFreq, setRecurFilterFreq] = useState("all");
+
+  // Year / quarter filter state for Monthly P&L, Dashboard, and Tax Report tabs
+  const [pnlYear, setPnlYear] = useState(String(new Date().getFullYear()));
+  const [pnlQuarter, setPnlQuarter] = useState("all");
+  const [dashYear, setDashYear] = useState(String(new Date().getFullYear()));
+  const [dashQuarter, setDashQuarter] = useState("all");
+  const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
+  const [taxQuarter, setTaxQuarter] = useState("all");
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
@@ -740,17 +748,20 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 2, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", marginTop: 10 }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-              flexShrink: 0, padding: "10px 14px", fontSize: 13,
-              fontFamily: "'Courier New', monospace", letterSpacing: 0.5,
-              textTransform: "uppercase", cursor: "pointer", border: "none",
-              background: activeTab === t.id ? "#1d4ed8" : "transparent",
-              color: activeTab === t.id ? "#fff" : "#94a3b8",
-              borderRadius: "8px 8px 0 0", whiteSpace: "nowrap",
-            }}>{t.label}</button>
-          ))}
+        <div style={{ position: "relative" }}>
+          <div style={{ display: "flex", gap: 2, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "thin", marginTop: 10, paddingBottom: 3 }}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                flexShrink: 0, padding: "10px 14px", fontSize: 13,
+                fontFamily: "'Courier New', monospace", letterSpacing: 0.5,
+                textTransform: "uppercase", cursor: "pointer", border: "none",
+                background: activeTab === t.id ? "#1d4ed8" : "transparent",
+                color: activeTab === t.id ? "#fff" : "#94a3b8",
+                borderRadius: "8px 8px 0 0", whiteSpace: "nowrap",
+              }}>{t.label}</button>
+            ))}
+          </div>
+          <div style={{ position: "absolute", right: 0, top: 10, bottom: 3, width: 40, background: "linear-gradient(to right, transparent, #0a0d16)", pointerEvents: "none" }} />
         </div>
       </div>
 
@@ -760,62 +771,101 @@ export default function App() {
         ) : (
           <>
             {/* DASHBOARD */}
-            {activeTab === "dashboard" && (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                  <div style={{ background: "#0f1117", border: "1px solid #14532d", borderRadius: 12, padding: "14px" }}>
-                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL INCOME</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80" }}>{fmt(totalIncome)}</div>
+            {activeTab === "dashboard" && (() => {
+              const dashYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
+              const nowYear = String(new Date().getFullYear());
+              if (!dashYears.includes(nowYear)) dashYears.unshift(nowYear);
+              const dashTxs = transactions.filter(t => {
+                if (!t.transaction_date) return false;
+                if (dashYear !== "all" && t.transaction_date.slice(0,4) !== dashYear) return false;
+                if (dashQuarter !== "all") {
+                  const m = parseInt(t.transaction_date.slice(5,7));
+                  if (Math.ceil(m / 3) !== parseInt(dashQuarter)) return false;
+                }
+                return true;
+              });
+              const dashIncome   = dashTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+              const dashExpenses = dashTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+              const dashNet      = dashIncome - dashExpenses;
+              const filteredPropStats = properties.map(prop => {
+                const txs = dashTxs.filter(t => t.property_id === prop.id);
+                const inc = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+                const exp = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+                return { ...prop, income: inc, expenses: exp, net: inc - exp, txCount: txs.length };
+              });
+              const periodLabel = dashYear === "all" ? "ALL TIME" : dashQuarter === "all" ? dashYear : `Q${dashQuarter} ${dashYear}`;
+              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
+              return (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                    <select value={dashYear} onChange={e => setDashYear(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Years</option>
+                      {dashYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <select value={dashQuarter} onChange={e => setDashQuarter(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Quarters</option>
+                      <option value="1">Q1 — Jan–Mar</option>
+                      <option value="2">Q2 — Apr–Jun</option>
+                      <option value="3">Q3 — Jul–Sep</option>
+                      <option value="4">Q4 — Oct–Dec</option>
+                    </select>
                   </div>
-                  <div style={{ background: "#0f1117", border: "1px solid #7f1d1d", borderRadius: 12, padding: "14px" }}>
-                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL EXPENSES</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(totalExpenses)}</div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                    <div style={{ background: "#0f1117", border: "1px solid #14532d", borderRadius: 12, padding: "14px" }}>
+                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL INCOME</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80" }}>{fmt(dashIncome)}</div>
+                    </div>
+                    <div style={{ background: "#0f1117", border: "1px solid #7f1d1d", borderRadius: 12, padding: "14px" }}>
+                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL EXPENSES</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(dashExpenses)}</div>
+                    </div>
                   </div>
-                </div>
 
-                <div style={{ background: "#0f1117", border: `1px solid ${totalNet >= 0 ? "#14532d" : "#7f1d1d"}`, borderRadius: 12, padding: "14px", marginBottom: 20 }}>
-                  <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>NET PROFIT / LOSS — YTD</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: totalNet >= 0 ? "#4ade80" : "#f87171" }}>{fmt(totalNet)}</div>
-                </div>
+                  <div style={{ background: "#0f1117", border: `1px solid ${dashNet >= 0 ? "#14532d" : "#7f1d1d"}`, borderRadius: 12, padding: "14px", marginBottom: 20 }}>
+                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>NET PROFIT / LOSS — {periodLabel}</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: dashNet >= 0 ? "#4ade80" : "#f87171" }}>{fmt(dashNet)}</div>
+                  </div>
 
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>PORTFOLIO — {properties.length} UNITS</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {propStats.map(p => {
-                    const tc = typeColor(p.property_type);
-                    return (
-                      <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: "16px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                          <div style={{ flex: 1, marginRight: 12 }}>
-                            <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 2 }}>{p.name}</div>
-                            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
-                            <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
-                          </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net P&L</div>
-                            <div style={{ fontSize: 18, fontWeight: 700, color: p.net > 0 ? "#4ade80" : p.net < 0 ? "#f87171" : "#94a3b8" }}>
-                              {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>PORTFOLIO — {properties.length} UNITS</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {filteredPropStats.map(p => {
+                      const tc = typeColor(p.property_type);
+                      return (
+                        <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: "16px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                            <div style={{ flex: 1, marginRight: 12 }}>
+                              <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 2 }}>{p.name}</div>
+                              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
+                              <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net P&L</div>
+                              <div style={{ fontSize: 18, fontWeight: 700, color: p.net > 0 ? "#4ade80" : p.net < 0 ? "#f87171" : "#94a3b8" }}>
+                                {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
+                              </div>
                             </div>
                           </div>
+                          {p.note && <div style={{ fontSize: 12, color: "#94a3b8", borderTop: "1px solid #1e2235", paddingTop: 8, marginTop: 6 }}>{p.note}</div>}
+                          {(p.income > 0 || p.expenses > 0) && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10, marginTop: 10 }}>
+                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
+                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
+                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Txns</div><div style={{ fontSize: 13, color: "#cbd5e1" }}>{p.txCount}</div></div>
+                            </div>
+                          )}
                         </div>
-                        {p.note && <div style={{ fontSize: 12, color: "#94a3b8", borderTop: "1px solid #1e2235", paddingTop: 8, marginTop: 6 }}>{p.note}</div>}
-                        {(p.income > 0 || p.expenses > 0) && (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10, marginTop: 10 }}>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Txns</div><div style={{ fontSize: 13, color: "#cbd5e1" }}>{p.txCount}</div></div>
-                          </div>
-                        )}
+                      );
+                    })}
+                    {properties.length === 0 && (
+                      <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>
+                        No properties yet. <span onClick={() => setActiveTab("properties")} style={{ color: "#3b82f6", cursor: "pointer" }}>Add one →</span>
                       </div>
-                    );
-                  })}
-                  {properties.length === 0 && (
-                    <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>
-                      No properties yet. <span onClick={() => setActiveTab("properties")} style={{ color: "#3b82f6", cursor: "pointer" }}>Add one →</span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+                    )}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* TRANSACTIONS */}
             {activeTab === "transactions" && (
@@ -1156,17 +1206,18 @@ export default function App() {
                 setImportDoneCount(inserted.length);
 
                 // ── Post-import duplicate detection ──────────────────────────
-                const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
                 const dupes = [];
                 (inserted || []).forEach(newTx => {
                   prevTransactions.forEach(ex => {
-                    if ((ex.description || "").toLowerCase().trim() !== (newTx.description || "").toLowerCase().trim()) return;
-                    if (Math.abs(Math.abs(ex.amount) - Math.abs(newTx.amount)) > 0.01) return;
-                    const diff = Math.abs(
+                    const sameDate = ex.transaction_date === newTx.transaction_date;
+                    const sameDesc = (ex.description || "").toLowerCase().trim() === (newTx.description || "").toLowerCase().trim();
+                    const sameCat  = (ex.category || "") === (newTx.category || "");
+                    const amtClose = Math.abs(Math.abs(ex.amount) - Math.abs(newTx.amount)) <= 5;
+                    const daysDiff = Math.abs(
                       new Date(ex.transaction_date + "T12:00:00") - new Date(newTx.transaction_date + "T12:00:00")
-                    );
-                    if (diff > THREE_DAYS_MS) return;
-                    if (!dupes.some(d => d.existing.id === ex.id && d.imported.id === newTx.id)) {
+                    ) / (1000 * 60 * 60 * 24);
+                    const isDupe = (sameDate && amtClose) || (sameDate && sameDesc) || (sameDesc && sameCat && daysDiff <= 3);
+                    if (isDupe && !dupes.some(d => d.existing.id === ex.id && d.imported.id === newTx.id)) {
                       dupes.push({ existing: ex, imported: newTx });
                     }
                   });
@@ -1211,7 +1262,7 @@ export default function App() {
                 <div>
                   <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>REVIEW POSSIBLE DUPLICATES</div>
                   <div style={{ background: "#1c1200", border: "1px solid #d97706", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#d97706", lineHeight: 1.6 }}>
-                    ⚠️ {importDuplicates.length} possible duplicate{importDuplicates.length !== 1 ? "s" : ""} found — same description and amount within 3 days of an existing record. Choose what to keep for each one.
+                    ⚠️ {importDuplicates.length} possible duplicate{importDuplicates.length !== 1 ? "s" : ""} found — same date + similar amount, same date + same payee, or same payee + category within 3 days of an existing record. Choose what to keep for each one.
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
                     {importDuplicates.map(({ existing, imported }, idx) => (
@@ -1497,111 +1548,141 @@ export default function App() {
             })()}
 
             {/* MONTHLY P&L */}
-            {activeTab === "monthly" && (
-              <>
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>MONTHLY P&L — ACTUAL VS PROJECTED</div>
-                {(() => {
-                  const monthMap = {};
-                  transactions.forEach(t => {
-                    const month = t.transaction_date?.slice(0, 7);
-                    if (!month) return;
-                    if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
-                    if (t.amount > 0) monthMap[month].income += t.amount;
-                    else monthMap[month].expenses += Math.abs(t.amount);
-                  });
-                  const months = Object.keys(monthMap).sort();
-                  const maxVal = Math.max(...months.map(m => Math.max(monthMap[m].income, monthMap[m].expenses)), 1);
-                  return months.length > 0 ? (
-                    <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
-                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>ACTUAL — BY MONTH</div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100, overflowX: "auto" }}>
-                        {months.map((m, i) => {
-                          const { income, expenses } = monthMap[m];
-                          const net = income - expenses;
-                          return (
-                            <div key={i} style={{ flex: "0 0 auto", minWidth: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                              <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
-                                <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(income / maxVal) * 70}px`, minHeight: income > 0 ? 2 : 0 }} />
-                                <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(expenses / maxVal) * 70}px`, minHeight: expenses > 0 ? 2 : 0 }} />
-                              </div>
-                              <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>{m.slice(5)}</div>
-                              <div style={{ fontSize: 9, color: net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(net)}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#4ade80", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Income</span></div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#f87171", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Expenses</span></div>
-                      </div>
-                    </div>
-                  ) : <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>No transaction data yet.</div>;
-                })()}
+            {activeTab === "monthly" && (() => {
+              const pnlYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
+              const nowYear = String(new Date().getFullYear());
+              if (!pnlYears.includes(nowYear)) pnlYears.unshift(nowYear);
+              const pnlTxs = transactions.filter(t => {
+                if (!t.transaction_date) return false;
+                if (pnlYear !== "all" && t.transaction_date.slice(0,4) !== pnlYear) return false;
+                if (pnlQuarter !== "all") {
+                  const m = parseInt(t.transaction_date.slice(5,7));
+                  if (Math.ceil(m / 3) !== parseInt(pnlQuarter)) return false;
+                }
+                return true;
+              });
+              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>MONTHLY P&L — ACTUAL VS PROJECTED</div>
 
-                {(() => {
-                  const now = new Date();
-                  const months = [];
-                  for (let i = 0; i < 6; i++) {
-                    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-                    const label = d.toLocaleString("default", { month: "short" }) + " " + d.getFullYear();
-                    let income = 0, expenses = 0;
-                    recurring.forEach(r => {
-                      if (r.frequency === "monthly") {
-                        if (r.amount > 0) income += r.amount;
-                        else expenses += Math.abs(r.amount);
-                      }
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    <select value={pnlYear} onChange={e => setPnlYear(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Years</option>
+                      {pnlYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <select value={pnlQuarter} onChange={e => setPnlQuarter(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Quarters</option>
+                      <option value="1">Q1 — Jan–Mar</option>
+                      <option value="2">Q2 — Apr–Jun</option>
+                      <option value="3">Q3 — Jul–Sep</option>
+                      <option value="4">Q4 — Oct–Dec</option>
+                    </select>
+                  </div>
+
+                  {(() => {
+                    const monthMap = {};
+                    pnlTxs.forEach(t => {
+                      const month = t.transaction_date?.slice(0, 7);
+                      if (!month) return;
+                      if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
+                      if (t.amount > 0) monthMap[month].income += t.amount;
+                      else monthMap[month].expenses += Math.abs(t.amount);
                     });
-                    months.push({ label, income, expenses, net: income - expenses });
-                  }
-                  const maxVal = Math.max(...months.map(m => Math.max(m.income, m.expenses)), 1);
-                  return recurring.length > 0 ? (
-                    <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
-                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>6-MONTH PROJECTION (RECURRING)</div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100 }}>
-                        {months.map((m, i) => (
-                          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                            <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
-                              <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(m.income / maxVal) * 70}px`, minHeight: m.income > 0 ? 2 : 0 }} />
-                              <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(m.expenses / maxVal) * 70}px`, minHeight: m.expenses > 0 ? 2 : 0 }} />
-                            </div>
-                            <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace", textAlign: "center" }}>{m.label}</div>
-                            <div style={{ fontSize: 9, color: m.net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(m.net)}</div>
-                          </div>
-                        ))}
+                    const months = Object.keys(monthMap).sort();
+                    const maxVal = Math.max(...months.map(m => Math.max(monthMap[m].income, monthMap[m].expenses)), 1);
+                    return months.length > 0 ? (
+                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
+                        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>ACTUAL — BY MONTH</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100, overflowX: "auto" }}>
+                          {months.map((m, i) => {
+                            const { income, expenses } = monthMap[m];
+                            const net = income - expenses;
+                            return (
+                              <div key={i} style={{ flex: "0 0 auto", minWidth: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                                <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
+                                  <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(income / maxVal) * 70}px`, minHeight: income > 0 ? 2 : 0 }} />
+                                  <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(expenses / maxVal) * 70}px`, minHeight: expenses > 0 ? 2 : 0 }} />
+                                </div>
+                                <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>{m.slice(5)}</div>
+                                <div style={{ fontSize: 9, color: net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(net)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#4ade80", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Income</span></div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#f87171", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Expenses</span></div>
+                        </div>
                       </div>
-                    </div>
-                  ) : null;
-                })()}
+                    ) : <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>No transaction data for this period.</div>;
+                  })()}
 
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>MONTH BY MONTH</div>
-                {(() => {
-                  const monthMap = {};
-                  transactions.forEach(t => {
-                    const month = t.transaction_date?.slice(0, 7);
-                    if (!month) return;
-                    if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
-                    if (t.amount > 0) monthMap[month].income += t.amount;
-                    else monthMap[month].expenses += Math.abs(t.amount);
-                  });
-                  return Object.keys(monthMap).sort().reverse().map(month => {
-                    const { income, expenses } = monthMap[month];
-                    const net = income - expenses;
-                    return (
-                      <div key={month} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                          <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600 }}>{new Date(month + "-02").toLocaleString("default", { month: "long", year: "numeric" })}</div>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: net >= 0 ? "#4ade80" : "#f87171" }}>{fmt(net)}</div>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                          <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 14, color: "#4ade80" }}>{fmt(income)}</div></div>
-                          <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 14, color: "#f87171" }}>{fmt(expenses)}</div></div>
+                  {(() => {
+                    const now = new Date();
+                    const months = [];
+                    for (let i = 0; i < 6; i++) {
+                      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+                      const label = d.toLocaleString("default", { month: "short" }) + " " + d.getFullYear();
+                      let income = 0, expenses = 0;
+                      recurring.forEach(r => {
+                        if (r.frequency === "monthly") {
+                          if (r.amount > 0) income += r.amount;
+                          else expenses += Math.abs(r.amount);
+                        }
+                      });
+                      months.push({ label, income, expenses, net: income - expenses });
+                    }
+                    const maxVal = Math.max(...months.map(m => Math.max(m.income, m.expenses)), 1);
+                    return recurring.length > 0 ? (
+                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
+                        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>6-MONTH PROJECTION (RECURRING)</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100 }}>
+                          {months.map((m, i) => (
+                            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                              <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
+                                <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(m.income / maxVal) * 70}px`, minHeight: m.income > 0 ? 2 : 0 }} />
+                                <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(m.expenses / maxVal) * 70}px`, minHeight: m.expenses > 0 ? 2 : 0 }} />
+                              </div>
+                              <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace", textAlign: "center" }}>{m.label}</div>
+                              <div style={{ fontSize: 9, color: m.net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(m.net)}</div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    );
-                  });
-                })()}
-              </>
-            )}
+                    ) : null;
+                  })()}
+
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>MONTH BY MONTH</div>
+                  {(() => {
+                    const monthMap = {};
+                    pnlTxs.forEach(t => {
+                      const month = t.transaction_date?.slice(0, 7);
+                      if (!month) return;
+                      if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
+                      if (t.amount > 0) monthMap[month].income += t.amount;
+                      else monthMap[month].expenses += Math.abs(t.amount);
+                    });
+                    return Object.keys(monthMap).sort().reverse().map(month => {
+                      const { income, expenses } = monthMap[month];
+                      const net = income - expenses;
+                      return (
+                        <div key={month} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                            <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600 }}>{new Date(month + "-02").toLocaleString("default", { month: "long", year: "numeric" })}</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: net >= 0 ? "#4ade80" : "#f87171" }}>{fmt(net)}</div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 14, color: "#4ade80" }}>{fmt(income)}</div></div>
+                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 14, color: "#f87171" }}>{fmt(expenses)}</div></div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </>
+              );
+            })()}
 
             {/* RECURRING */}
             {activeTab === "recurring" && (
@@ -1739,10 +1820,15 @@ export default function App() {
                         <button onClick={() => { setEditingRecurring(r); setRecurringForm({ property_id: r.property_id || "all", description: r.description, amount: Math.abs(r.amount), type: r.type, category: r.category || "", frequency: r.frequency, day_of_month: r.day_of_month, next_due_date: r.next_due_date, end_date: r.end_date || "" }); setShowRecurringForm(true); }}
                           style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
                         <button onClick={async () => {
-                          if (!window.confirm("Stop this recurring transaction?")) return;
+                          if (!window.confirm("Stop this recurring transaction? It will no longer generate future entries.")) return;
                           await supabase.from("recurring_transactions").update({ active: false }).eq("id", r.id);
                           setRecurring(prev => prev.filter(x => x.id !== r.id));
                         }} style={{ background: "#1e2235", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 14px", color: "#f87171", cursor: "pointer", fontSize: 12 }}>Stop</button>
+                        <button onClick={async () => {
+                          if (!window.confirm(`Delete "${r.description}" permanently? This cannot be undone.`)) return;
+                          const { error } = await supabase.from("recurring_transactions").delete().eq("id", r.id);
+                          if (!error) setRecurring(prev => prev.filter(x => x.id !== r.id));
+                        }} style={{ background: "#2d0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 10px", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>✕</button>
                       </div>
                     </div>
                   ))}
@@ -1941,207 +2027,252 @@ export default function App() {
             )}
 
             {/* TAX REPORT */}
-            {activeTab === "tax report" && (
-              <>
-                {/* Tax Report Action Buttons */}
-                <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-                  <button
-                    onClick={() => {
-                      const year = new Date().getFullYear();
-                      const expenseRows = Object.entries(taxSummary).map(([label, amt]) =>
-                        `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
-                      ).join("");
-                      const propRows = propStats.map(p =>
-                        `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
-                      ).join("");
-                      const html = `<html><head><title>${business?.name || "LandlordLedger"} — Tax Report ${year}</title>
-                        <style>
-                          body{font-family:Georgia,serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
-                          h1{font-size:22px;margin-bottom:4px}
-                          h2{font-size:14px;color:#555;margin-bottom:24px;font-weight:normal}
-                          h3{font-size:15px;margin:28px 0 8px;border-bottom:2px solid #ccc;padding-bottom:6px}
-                          table{width:100%;border-collapse:collapse;margin-bottom:8px}
-                          th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:13px;border-bottom:2px solid #ccc}
-                          th:not(:first-child){text-align:right}
-                          td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
-                          .total td{font-weight:bold;font-size:15px;border-top:2px solid #ccc;border-bottom:none}
-                          .note{font-size:11px;color:#888;margin-top:4px}
-                        </style>
-                        </head><body>
-                        <h1>${business?.name || "LandlordLedger"} — Tax Report</h1>
-                        <h2>Tax Year ${year} &nbsp;·&nbsp; Schedule E Summary &nbsp;·&nbsp; Consult your CPA before filing.</h2>
-                        <h3>Schedule E — Deductible Expenses</h3>
-                        <table>
-                          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-                          <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
-                          <tfoot><tr class="total"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(totalExpenses)}</td></tr></tfoot>
-                        </table>
-                        <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies.</p>
-                        <h3>Net P&amp;L by Property</h3>
-                        <table>
-                          <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net</th></tr></thead>
-                          <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
-                        </table>
-                        </body></html>`;
-                      const w = window.open("", "_blank");
-                      w.document.write(html);
-                      w.document.close();
-                      w.print();
-                    }}
-                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                  >
-                    🖨️ Print Tax Report
-                  </button>
-                  <button
-                    onClick={() => {
-                      const header = "Date,Property,Description,Category,Amount,Type\n";
-                      const rows = transactions.map(t => {
-                        const prop = properties.find(p => p.id === t.property_id);
-                        return [
-                          t.transaction_date,
-                          `"${(prop?.name || "").replace(/"/g, '""')}"`,
-                          `"${(t.description || "").replace(/"/g, '""')}"`,
-                          `"${(t.category || "").replace(/"/g, '""')}"`,
-                          t.amount,
-                          t.amount >= 0 ? "Income" : "Expense"
-                        ].join(",");
-                      }).join("\n");
-                      const blob = new Blob([header + rows], { type: "text/csv" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = "LandlordLedger-All-Transactions.csv";
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      URL.revokeObjectURL(url);
-                    }}
-                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                  >
-                    📥 Export All Transactions CSV
-                  </button>
-                  <button
-                    onClick={() => {
-                      const year = new Date().getFullYear();
-                      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
-                      // Header bar
-                      doc.setFillColor(15, 17, 23);
-                      doc.rect(0, 0, 216, 28, 'F');
-                      doc.setFontSize(16);
-                      doc.setFont('helvetica', 'bold');
-                      doc.setTextColor(255, 255, 255);
-                      const lw = doc.getTextWidth('Landlord');
-                      doc.text('Landlord', 14, 18);
-                      doc.setTextColor(59, 130, 246);
-                      doc.text('Ledger', 14 + lw, 18);
-                      // Title
-                      doc.setTextColor(30, 30, 30);
-                      doc.setFontSize(14);
-                      doc.setFont('helvetica', 'bold');
-                      doc.text(`${business?.name || 'Tax Report'} — Schedule E`, 14, 42);
-                      doc.setFontSize(9);
-                      doc.setFont('helvetica', 'normal');
-                      doc.setTextColor(100, 100, 100);
-                      doc.text(`Tax Year ${year}  |  Generated ${new Date().toLocaleDateString()}`, 14, 50);
-                      doc.setDrawColor(59, 130, 246);
-                      doc.setLineWidth(0.4);
-                      doc.line(14, 54, 202, 54);
-                      // Deductible expenses section
-                      doc.setFontSize(11);
-                      doc.setFont('helvetica', 'bold');
-                      doc.setTextColor(30, 30, 30);
-                      doc.text('Deductible Expenses', 14, 63);
-                      autoTable(doc, {
-                        startY: 67,
-                        head: [['Category', 'Amount']],
-                        body: Object.entries(taxSummary).length
-                          ? Object.entries(taxSummary).map(([label, amt]) => [label, fmt(amt)])
-                          : [['No expenses logged', '']],
-                        foot: [['Total Deductible Expenses', fmt(totalExpenses)]],
-                        styles: { fontSize: 9, cellPadding: 3 },
-                        headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
-                        footStyles: { fillColor: [239, 246, 255], textColor: [30, 30, 30], fontStyle: 'bold' },
-                        columnStyles: { 1: { halign: 'right' } },
-                        alternateRowStyles: { fillColor: [248, 250, 252] },
-                      });
-                      // Note
-                      const noteY = doc.lastAutoTable.finalY + 5;
-                      doc.setFontSize(7);
-                      doc.setFont('helvetica', 'italic');
-                      doc.setTextColor(150, 150, 150);
-                      doc.text('* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.', 14, noteY, { maxWidth: 188 });
-                      // Net P&L by property section
-                      const y2 = noteY + 10;
-                      doc.setFontSize(11);
-                      doc.setFont('helvetica', 'bold');
-                      doc.setTextColor(30, 30, 30);
-                      doc.text('Net P&L by Property', 14, y2);
-                      autoTable(doc, {
-                        startY: y2 + 4,
-                        head: [['Property', 'Gross Income', 'Expenses', 'Net P&L']],
-                        body: propStats.length
-                          ? propStats.map(p => [p.name + (p.address ? `\n${p.address}` : ''), fmt(p.income), fmt(p.expenses), fmt(p.net)])
-                          : [['No properties', '', '', '']],
-                        styles: { fontSize: 9, cellPadding: 3 },
-                        headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
-                        columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
-                        alternateRowStyles: { fillColor: [248, 250, 252] },
-                      });
-                      doc.save(`LandlordLedger-TaxReport-${year}.pdf`);
-                    }}
-                    style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                  >
-                    📄 Export Tax Report PDF
-                  </button>
-                </div>
+            {activeTab === "tax report" && (() => {
+              const taxYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
+              const nowYear = String(new Date().getFullYear());
+              if (!taxYears.includes(nowYear)) taxYears.unshift(nowYear);
 
-                <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 4 }}>SCHEDULE E — DEDUCTIBLE EXPENSES</div>
-                  <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>Year-to-date. Consult your CPA before filing.</div>
-                  {Object.entries(taxSummary).length === 0
-                    ? <div style={{ fontSize: 14, color: "#94a3b8", padding: "12px 0" }}>No expenses logged yet.</div>
-                    : Object.entries(taxSummary).map(([label, amt]) => (
-                      <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 0", borderBottom: "1px solid #1e2235" }}>
-                        <div style={{ fontSize: 14, color: "#e2e8f0" }}>{label}</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: "#f87171" }}>{fmt(amt)}</div>
-                      </div>
-                    ))
-                  }
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 16 }}>
-                    <div style={{ fontSize: 14, color: "#cbd5e1", fontWeight: 600 }}>Total Deductible</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(totalExpenses)}</div>
+              const taxTxs = transactions.filter(t => {
+                if (!t.transaction_date) return false;
+                if (taxYear !== "all" && t.transaction_date.slice(0,4) !== taxYear) return false;
+                if (taxQuarter !== "all") {
+                  const m = parseInt(t.transaction_date.slice(5,7));
+                  if (Math.ceil(m / 3) !== parseInt(taxQuarter)) return false;
+                }
+                return true;
+              });
+
+              const filteredTaxSummary = {};
+              taxTxs.filter(t => t.amount < 0).forEach(t => {
+                const label = TAX_CATEGORIES[t.category] || "Miscellaneous";
+                filteredTaxSummary[label] = (filteredTaxSummary[label] || 0) + Math.abs(t.amount);
+              });
+              const filteredTaxExpenses = taxTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+              const filteredTaxPropStats = properties.map(prop => {
+                const txs = taxTxs.filter(t => t.property_id === prop.id);
+                const inc = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+                const exp = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+                return { ...prop, income: inc, expenses: exp, net: inc - exp };
+              });
+
+              const periodLabel = taxYear === "all"
+                ? "All Time"
+                : taxQuarter === "all" ? taxYear : `Q${taxQuarter} ${taxYear}`;
+              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
+
+              return (
+                <>
+                  {/* Year / Quarter filter */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    <select value={taxYear} onChange={e => setTaxYear(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Years</option>
+                      {taxYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <select value={taxQuarter} onChange={e => setTaxQuarter(e.target.value)} style={filterSelectSm}>
+                      <option value="all">All Quarters</option>
+                      <option value="1">Q1 — Jan–Mar</option>
+                      <option value="2">Q2 — Apr–Jun</option>
+                      <option value="3">Q3 — Jul–Sep</option>
+                      <option value="4">Q4 — Oct–Dec</option>
+                    </select>
+                    {(taxYear !== "all" || taxQuarter !== "all") && (
+                      <span style={{ fontSize: 12, color: "#3b82f6", alignSelf: "center", fontFamily: "'Courier New', monospace" }}>— {periodLabel}</span>
+                    )}
                   </div>
-                </div>
 
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>NET BY PROPERTY</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {propStats.map(p => {
-                    const tc = typeColor(p.property_type);
-                    return (
-                      <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                          <div>
-                            <div style={{ fontSize: 14, color: "#e2e8f0", marginBottom: 4 }}>{p.name}</div>
-                            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
-                            <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
-                          </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net</div>
-                            <div style={{ fontSize: 18, fontWeight: 700, color: p.net >= 0 ? "#4ade80" : "#f87171" }}>
-                              {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
+                  {/* Action Buttons */}
+                  <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => {
+                        const expenseRows = Object.entries(filteredTaxSummary).map(([label, amt]) =>
+                          `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
+                        ).join("");
+                        const propRows = filteredTaxPropStats.map(p =>
+                          `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
+                        ).join("");
+                        const html = `<html><head><title>${business?.name || "LandlordLedger"} — Tax Report ${periodLabel}</title>
+                          <style>
+                            body{font-family:Georgia,serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
+                            h1{font-size:22px;margin-bottom:4px}
+                            h2{font-size:14px;color:#555;margin-bottom:24px;font-weight:normal}
+                            h3{font-size:15px;margin:28px 0 8px;border-bottom:2px solid #ccc;padding-bottom:6px}
+                            table{width:100%;border-collapse:collapse;margin-bottom:8px}
+                            th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:13px;border-bottom:2px solid #ccc}
+                            th:not(:first-child){text-align:right}
+                            td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
+                            .total td{font-weight:bold;font-size:15px;border-top:2px solid #ccc;border-bottom:none}
+                            .note{font-size:11px;color:#888;margin-top:4px}
+                          </style>
+                          </head><body>
+                          <h1>${business?.name || "LandlordLedger"} — Tax Report</h1>
+                          <h2>Period: ${periodLabel} &nbsp;·&nbsp; Schedule E Summary &nbsp;·&nbsp; Consult your CPA before filing.</h2>
+                          <h3>Schedule E — Deductible Expenses</h3>
+                          <table>
+                            <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                            <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
+                            <tfoot><tr class="total"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(filteredTaxExpenses)}</td></tr></tfoot>
+                          </table>
+                          <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies.</p>
+                          <h3>Net P&amp;L by Property</h3>
+                          <table>
+                            <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net</th></tr></thead>
+                            <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
+                          </table>
+                          </body></html>`;
+                        const w = window.open("", "_blank");
+                        w.document.write(html);
+                        w.document.close();
+                        w.print();
+                      }}
+                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      🖨️ Print Tax Report
+                    </button>
+                    <button
+                      onClick={() => {
+                        const header = "Date,Property,Description,Category,Amount,Type\n";
+                        const rows = taxTxs.map(t => {
+                          const prop = properties.find(p => p.id === t.property_id);
+                          return [
+                            t.transaction_date,
+                            `"${(prop?.name || "").replace(/"/g, '""')}"`,
+                            `"${(t.description || "").replace(/"/g, '""')}"`,
+                            `"${(t.category || "").replace(/"/g, '""')}"`,
+                            t.amount,
+                            t.amount >= 0 ? "Income" : "Expense"
+                          ].join(",");
+                        }).join("\n");
+                        const blob = new Blob([header + rows], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `LandlordLedger-Transactions-${periodLabel.replace(/\s/g,"-")}.csv`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      📥 Export CSV
+                    </button>
+                    <button
+                      onClick={() => {
+                        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
+                        doc.setFillColor(15, 17, 23);
+                        doc.rect(0, 0, 216, 28, 'F');
+                        doc.setFontSize(16);
+                        doc.setFont('helvetica', 'bold');
+                        doc.setTextColor(255, 255, 255);
+                        const lw = doc.getTextWidth('Landlord');
+                        doc.text('Landlord', 14, 18);
+                        doc.setTextColor(59, 130, 246);
+                        doc.text('Ledger', 14 + lw, 18);
+                        doc.setTextColor(30, 30, 30);
+                        doc.setFontSize(14);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text(`${business?.name || 'Tax Report'} — Schedule E`, 14, 42);
+                        doc.setFontSize(9);
+                        doc.setFont('helvetica', 'normal');
+                        doc.setTextColor(100, 100, 100);
+                        doc.text(`Period: ${periodLabel}  |  Generated ${new Date().toLocaleDateString()}`, 14, 50);
+                        doc.setDrawColor(59, 130, 246);
+                        doc.setLineWidth(0.4);
+                        doc.line(14, 54, 202, 54);
+                        doc.setFontSize(11);
+                        doc.setFont('helvetica', 'bold');
+                        doc.setTextColor(30, 30, 30);
+                        doc.text('Deductible Expenses', 14, 63);
+                        autoTable(doc, {
+                          startY: 67,
+                          head: [['Category', 'Amount']],
+                          body: Object.entries(filteredTaxSummary).length
+                            ? Object.entries(filteredTaxSummary).map(([label, amt]) => [label, fmt(amt)])
+                            : [['No expenses logged', '']],
+                          foot: [['Total Deductible Expenses', fmt(filteredTaxExpenses)]],
+                          styles: { fontSize: 9, cellPadding: 3 },
+                          headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
+                          footStyles: { fillColor: [239, 246, 255], textColor: [30, 30, 30], fontStyle: 'bold' },
+                          columnStyles: { 1: { halign: 'right' } },
+                          alternateRowStyles: { fillColor: [248, 250, 252] },
+                        });
+                        const noteY = doc.lastAutoTable.finalY + 5;
+                        doc.setFontSize(7);
+                        doc.setFont('helvetica', 'italic');
+                        doc.setTextColor(150, 150, 150);
+                        doc.text('* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.', 14, noteY, { maxWidth: 188 });
+                        const y2 = noteY + 10;
+                        doc.setFontSize(11);
+                        doc.setFont('helvetica', 'bold');
+                        doc.setTextColor(30, 30, 30);
+                        doc.text('Net P&L by Property', 14, y2);
+                        autoTable(doc, {
+                          startY: y2 + 4,
+                          head: [['Property', 'Gross Income', 'Expenses', 'Net P&L']],
+                          body: filteredTaxPropStats.length
+                            ? filteredTaxPropStats.map(p => [p.name + (p.address ? `\n${p.address}` : ''), fmt(p.income), fmt(p.expenses), fmt(p.net)])
+                            : [['No properties', '', '', '']],
+                          styles: { fontSize: 9, cellPadding: 3 },
+                          headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
+                          columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+                          alternateRowStyles: { fillColor: [248, 250, 252] },
+                        });
+                        doc.save(`LandlordLedger-TaxReport-${periodLabel.replace(/\s/g,"-")}.pdf`);
+                      }}
+                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      📄 Export PDF
+                    </button>
+                  </div>
+
+                  <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 4 }}>SCHEDULE E — DEDUCTIBLE EXPENSES</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>{periodLabel}. Consult your CPA before filing.</div>
+                    {Object.entries(filteredTaxSummary).length === 0
+                      ? <div style={{ fontSize: 14, color: "#94a3b8", padding: "12px 0" }}>No expenses for this period.</div>
+                      : Object.entries(filteredTaxSummary).map(([label, amt]) => (
+                        <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 0", borderBottom: "1px solid #1e2235" }}>
+                          <div style={{ fontSize: 14, color: "#e2e8f0" }}>{label}</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: "#f87171" }}>{fmt(amt)}</div>
+                        </div>
+                      ))
+                    }
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 16 }}>
+                      <div style={{ fontSize: 14, color: "#cbd5e1", fontWeight: 600 }}>Total Deductible</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(filteredTaxExpenses)}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>NET BY PROPERTY</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {filteredTaxPropStats.map(p => {
+                      const tc = typeColor(p.property_type);
+                      return (
+                        <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 14, color: "#e2e8f0", marginBottom: 4 }}>{p.name}</div>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
+                              <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net</div>
+                              <div style={{ fontSize: 18, fontWeight: 700, color: p.net >= 0 ? "#4ade80" : "#f87171" }}>
+                                {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
+                              </div>
                             </div>
                           </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10 }}>
+                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Gross Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
+                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
+                          </div>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10 }}>
-                          <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Gross Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
-                          <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* BILLING */}
             {activeTab === "billing" && (
