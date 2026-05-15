@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.landlordledger.app",
+    "sha256_cert_fingerprints": [
+      "FE:31:81:0B:8F:19:E1:48:AC:7D:F0:26:55:D0:79:BE:35:B7:F9:82:86:B2:D2:D0:38:B5:D5:95:2A:44:E3:D8"
+    ]
+  }
+}]
