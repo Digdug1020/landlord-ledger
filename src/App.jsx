@@ -367,6 +367,8 @@ export default function App() {
   const [importPasteText, setImportPasteText] = useState("");
   const [importDragging, setImportDragging] = useState(false);
   const importDropRef = useRef(null);
+  const [importFileName, setImportFileName] = useState("");
+  const [showImportBatches, setShowImportBatches] = useState(false);
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
@@ -560,6 +562,23 @@ export default function App() {
       cats[label] = (cats[label] || 0) + Math.abs(t.amount);
     });
     return cats;
+  }, [transactions]);
+
+  const importBatches = useMemo(() => {
+    const batched = {};
+    transactions.filter(t => t.source === "import" && t.batch_id).forEach(t => {
+      if (!batched[t.batch_id]) batched[t.batch_id] = [];
+      batched[t.batch_id].push(t);
+    });
+    return Object.entries(batched).map(([id, txs]) => ({
+      id,
+      count: txs.length,
+      importedAt: txs.reduce((min, t) => t.created_at < min ? t.created_at : min, txs[0].created_at),
+      dateRange: {
+        from: txs.reduce((min, t) => t.transaction_date < min ? t.transaction_date : min, txs[0].transaction_date),
+        to: txs.reduce((max, t) => t.transaction_date > max ? t.transaction_date : max, txs[0].transaction_date),
+      },
+    })).sort((a, b) => b.importedAt.localeCompare(a.importedAt));
   }, [transactions]);
 
   const tabs = [
@@ -826,6 +845,36 @@ export default function App() {
                   </form>
                 )}
 
+                {importBatches.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <button onClick={() => setShowImportBatches(v => !v)}
+                      style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: showImportBatches ? "10px 10px 0 0" : 10, padding: "10px 14px", width: "100%", textAlign: "left", color: "#94a3b8", cursor: "pointer", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>📥 Import Batches ({importBatches.length})</span>
+                      <span style={{ fontSize: 11 }}>{showImportBatches ? "▲" : "▼"}</span>
+                    </button>
+                    {showImportBatches && (
+                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderTop: "none", borderRadius: "0 0 10px 10px" }}>
+                        {importBatches.map(batch => (
+                          <div key={batch.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #1e2235" }}>
+                            <div>
+                              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{batch.count} transaction{batch.count !== 1 ? "s" : ""}</div>
+                              <div style={{ fontSize: 11, color: "#64748b" }}>{batch.dateRange.from} → {batch.dateRange.to}</div>
+                              <div style={{ fontSize: 11, color: "#4b5563" }}>Imported {new Date(batch.importedAt).toLocaleDateString()}</div>
+                            </div>
+                            <button onClick={async () => {
+                              if (!window.confirm(`Delete all ${batch.count} transactions from this import batch?`)) return;
+                              const { error } = await supabase.from("transactions").delete().eq("batch_id", batch.id);
+                              if (!error) setTransactions(prev => prev.filter(t => t.batch_id !== batch.id));
+                            }} style={{ background: "#7f1d1d", border: "1px solid #f87171", borderRadius: 8, padding: "7px 12px", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+                              🗑️ Delete Batch
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {[...filtered].reverse().map((tx) => {
                     const isSelected = selectedTxIds.includes(tx.id);
@@ -881,6 +930,7 @@ export default function App() {
                 setImportError(null);
                 setImportParsing(true);
                 setImportStep("upload");
+                setImportFileName(file.name);
                 try {
                   let text = "";
                   if (file.name.match(/\.xlsx?$/i)) {
@@ -933,6 +983,7 @@ export default function App() {
 
               async function handleConfirmImport() {
                 if (wouldExceedFree) return;
+                const batchId = crypto.randomUUID();
                 const toInsert = importRows
                   .filter(r => !r._deleted)
                   .map(r => ({
@@ -944,6 +995,7 @@ export default function App() {
                     amount: r.type === "expense" ? -Math.abs(r.amount) : Math.abs(r.amount),
                     type: r.type,
                     source: "import",
+                    batch_id: batchId,
                   }));
                 if (toInsert.length === 0) return;
 
@@ -962,6 +1014,7 @@ export default function App() {
                 setImportParsing(false);
                 setImportPasteText("");
                 setImportDragging(false);
+                setImportFileName("");
               }
 
               function updateRow(id, field, value) {
@@ -977,7 +1030,7 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 32 }}>They're now in your Transactions tab.</div>
                   <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-                    <button onClick={() => { resetImport(); setActiveTab("transactions"); }}
+                    <button onClick={() => { resetImport(); setFilterProp("all"); setActiveTab("transactions"); }}
                       style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "12px 24px", color: "#fff", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
                       View Transactions
                     </button>
