@@ -12,6 +12,7 @@ export default function RecurringTab() {
   const [recurFilterProp, setRecurFilterProp] = useState('all');
   const [recurFilterType, setRecurFilterType] = useState('all');
   const [recurFilterFreq, setRecurFilterFreq] = useState('all');
+  const [showRecurringBatches, setShowRecurringBatches] = useState(false);
 
   const displayRecurring = useMemo(() => {
     let rows = [...recurring];
@@ -20,6 +21,22 @@ export default function RecurringTab() {
     if (recurFilterFreq !== 'all') rows = rows.filter(r => r.frequency === recurFilterFreq);
     return rows;
   }, [recurring, recurFilterProp, recurFilterType, recurFilterFreq]);
+
+  const recurringBatches = useMemo(() => {
+    const grouped = {};
+    recurring.filter(r => r.batch_id).forEach(r => {
+      if (!grouped[r.batch_id]) grouped[r.batch_id] = [];
+      grouped[r.batch_id].push(r);
+    });
+    return Object.entries(grouped).map(([id, items]) => {
+      const txBatch = importBatches.find(b => b.id === id);
+      return {
+        id,
+        count: items.length,
+        importedAt: txBatch?.importedAt || items[0].created_at || null,
+      };
+    }).sort((a, b) => (b.importedAt || '').localeCompare(a.importedAt || ''));
+  }, [recurring, importBatches]);
 
   function openAddForm() {
     setEditingRecurring(null);
@@ -132,6 +149,35 @@ export default function RecurringTab() {
         </form>
       )}
 
+      {recurringBatches.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setShowRecurringBatches(v => !v)}
+            style={{ background: '#0f1117', border: '1px solid #1e2235', borderRadius: showRecurringBatches ? '10px 10px 0 0' : 10, padding: '10px 14px', width: '100%', textAlign: 'left', color: '#94a3b8', cursor: 'pointer', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>📥 Import Batches ({recurringBatches.length})</span>
+            <span style={{ fontSize: 11 }}>{showRecurringBatches ? '▲' : '▼'}</span>
+          </button>
+          {showRecurringBatches && (
+            <div style={{ background: '#0f1117', border: '1px solid #1e2235', borderTop: 'none', borderRadius: '0 0 10px 10px' }}>
+              {recurringBatches.map(batch => (
+                <div key={batch.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid #1e2235' }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600 }}>{batch.count} recurring schedule{batch.count !== 1 ? 's' : ''}</div>
+                    <div style={{ fontSize: 11, color: '#4b5563' }}>Imported {batch.importedAt ? new Date(batch.importedAt).toLocaleDateString() : 'from file'}</div>
+                  </div>
+                  <button onClick={async () => {
+                    if (!window.confirm(`Delete all ${batch.count} recurring schedule${batch.count !== 1 ? 's' : ''} from this import batch?`)) return;
+                    const { error } = await supabase.from('recurring_transactions').delete().eq('batch_id', batch.id);
+                    if (!error) setRecurring(prev => prev.filter(r => r.batch_id !== batch.id));
+                  }} style={{ background: '#7f1d1d', border: '1px solid #f87171', borderRadius: 8, padding: '7px 12px', color: '#f87171', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    🗑️ Delete Batch
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {displayRecurring.length === 0 && (
           <div style={{ color: '#94a3b8', fontSize: 14, padding: '20px 0' }}>
@@ -155,23 +201,6 @@ export default function RecurringTab() {
             <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10, fontFamily: "'Courier New', monospace" }}>
               {r.frequency} · next: {r.next_due_date}{r.end_date ? ` · ends: ${r.end_date}` : ''}
             </div>
-            {r.batch_id && (() => {
-              const batch = importBatches.find(b => b.id === r.batch_id);
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '6px 10px', background: '#1c1200', border: '1px solid #3d2e00', borderRadius: 8 }}>
-                  <span style={{ fontSize: 11, color: '#92400e' }}>
-                    📥 Imported {batch ? new Date(batch.importedAt).toLocaleDateString() : 'from file'}
-                  </span>
-                  <button onClick={async () => {
-                    if (!window.confirm('Remove all recurring schedules from this import batch?')) return;
-                    const { error } = await supabase.from('recurring_transactions').delete().eq('batch_id', r.batch_id);
-                    if (!error) setRecurring(prev => prev.filter(x => x.batch_id !== r.batch_id));
-                  }} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}>
-                    ✕ Delete batch
-                  </button>
-                </div>
-              );
-            })()}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => openEditForm(r)}
                 style={{ background: '#1e2235', border: '1px solid #2d3555', borderRadius: 8, padding: '6px 14px', color: '#94a3b8', cursor: 'pointer', fontSize: 12 }}>Edit</button>
