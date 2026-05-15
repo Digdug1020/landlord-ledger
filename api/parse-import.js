@@ -50,26 +50,46 @@ ${text}`;
       messages: [{ role: 'user', content: prompt }],
     });
 
-    let content = message.content[0].text.trim();
+    const raw = message.content[0].text.trim();
 
-    // Extract the JSON array robustly: find the first [ and last ] in the
-    // response so any surrounding explanation text or code fences are ignored.
-    const arrayStart = content.indexOf('[');
-    const arrayEnd   = content.lastIndexOf(']');
-    if (arrayStart !== -1 && arrayEnd > arrayStart) {
-      content = content.slice(arrayStart, arrayEnd + 1);
+    // Try multiple strategies to extract a JSON array from the model response.
+    // Claude occasionally adds explanation text, code fences, or wraps the
+    // array in an object — handle all of these gracefully.
+    function extractArray(text) {
+      // 1. Bare valid JSON
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.transactions)) return parsed.transactions;
+      } catch {}
+
+      // 2. Slice from first [ to last ] to strip surrounding prose / fences
+      const aStart = text.indexOf('[');
+      const aEnd   = text.lastIndexOf(']');
+      if (aStart !== -1 && aEnd > aStart) {
+        try {
+          const parsed = JSON.parse(text.slice(aStart, aEnd + 1));
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+      }
+
+      // 3. Slice from first { to last } (model wrapped in an object)
+      const oStart = text.indexOf('{');
+      const oEnd   = text.lastIndexOf('}');
+      if (oStart !== -1 && oEnd > oStart) {
+        try {
+          const parsed = JSON.parse(text.slice(oStart, oEnd + 1));
+          if (Array.isArray(parsed)) return parsed;
+          if (parsed && Array.isArray(parsed.transactions)) return parsed.transactions;
+        } catch {}
+      }
+
+      return null;
     }
 
-    let transactions;
-    try {
-      transactions = JSON.parse(content);
-    } catch {
-      console.error('parse-import: JSON parse failed, raw response:', content.slice(0, 800));
-      return res.status(500).json({ error: 'AI returned an unexpected format. Please try again.' });
-    }
-
-    if (!Array.isArray(transactions)) {
-      console.error('parse-import: response was not an array, type:', typeof transactions);
+    const transactions = extractArray(raw);
+    if (!transactions) {
+      console.error('parse-import: all extraction strategies failed. Raw response (800 chars):', raw.slice(0, 800));
       return res.status(500).json({ error: 'AI returned an unexpected format. Please try again.' });
     }
 
