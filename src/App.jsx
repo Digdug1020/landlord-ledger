@@ -675,9 +675,10 @@ export default function App() {
         * { box-sizing: border-box; }
         input::placeholder { color: #94a3b8 !important; }
         select option { background: #0f1117; }
-        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #080b12; }
-        ::-webkit-scrollbar-thumb { background: #1e2235; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #60a5fa; }
       `}</style>
 
       {/* AI parsing overlay — blocks all interaction while Claude processes */}
