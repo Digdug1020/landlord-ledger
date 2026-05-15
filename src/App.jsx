@@ -1,325 +1,19 @@
+import { useState, useMemo, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import Landing from "./Landing";
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
-
-const CATEGORIES = ["Loan Payment", "Materials", "Repairs", "Insurance", "Utilities", "Labor", "Equipment", "Platform Fees", "Other"];
-
-const TAX_CATEGORIES = {
-  "Loan Payment": "Interest (deductible portion)",
-  "Materials": "Cost of Goods / Supplies",
-  "Repairs": "Repairs & Maintenance",
-  "Insurance": "Business Insurance",
-  "Utilities": "Utilities",
-  "Labor": "Contract Labor",
-  "Equipment": "Depreciation / Equipment",
-  "Platform Fees": "Platform Fees",
-  "Other": "Miscellaneous",
-};
-
-const PROPERTY_TYPES = ["Residential", "Airbnb", "For Sale", "Under Construction", "Commercial", "Other"];
-
-function fmt(n) {
-  return (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function printProperty(prop, transactions) {
-  const txs = transactions.filter(t => t.property_id === prop.id);
-  const income = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const expenses = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const net = income - expenses;
-  const rows = txs.map(t => `<tr><td>${t.transaction_date}</td><td>${t.description || ""}</td><td>${t.category || "—"}</td><td style="color:${t.amount >= 0 ? "green" : "red"}">${fmt(t.amount)}</td></tr>`).join("");
-  const html = `<html><head><title>${prop.name} — LandlordLedger</title>
-    <style>body{font-family:Georgia,serif;padding:40px;color:#111}h1{font-size:22px;margin-bottom:4px}h2{font-size:14px;color:#555;margin-bottom:24px;font-weight:normal}table{width:100%;border-collapse:collapse;margin-top:16px}th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:13px;border-bottom:2px solid #ccc}td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}.summary{margin-top:24px;border-top:2px solid #ccc;padding-top:16px}.summary div{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}.net{font-weight:bold;font-size:16px}</style>
-    </head><body>
-    <h1>LandlordLedger — ${prop.name}</h1>
-    <h2>${prop.address || ""} | ${prop.property_type || ""} | YTD</h2>
-    <table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="summary">
-      <div><span>Total Income</span><span style="color:green">${fmt(income)}</span></div>
-      <div><span>Total Expenses</span><span style="color:red">${fmt(expenses)}</span></div>
-      <div class="net"><span>Net P&L</span><span style="color:${net >= 0 ? "green" : "red"}">${fmt(net)}</span></div>
-    </div></body></html>`;
-  const w = window.open("", "_blank");
-  w.document.write(html);
-  w.document.close();
-  w.print();
-}
-
-function LoginScreen() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [mode, setMode] = useState("login"); // "login", "signup", "forgot"
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [success, setSuccess] = useState("");
-
-  async function signInWithGoogle() {
-    setLoading(true);
-    setError("");
-    Object.keys(sessionStorage).filter(k => k.startsWith('supabase')).forEach(k => sessionStorage.removeItem(k));
-    Object.keys(localStorage).filter(k => k.startsWith('supabase')).forEach(k => localStorage.removeItem(k));
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin }
-    });
-    if (error) { setError(error.message); setLoading(false); }
-  }
-
-  async function handleEmail(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    setSuccess("");
-    if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) { setError(error.message); }
-      else { setSuccess("Check your email for a confirmation link!"); }
-    } else if (mode === "forgot") {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin.replace(/\/+$/, "")}/#reset-password`
-      });
-      if (error) { setError(error.message); }
-      else { setSuccess("Password reset email sent! Check your inbox."); }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) { setError(error.message); }
-    }
-    setLoading(false);
-  }
-
-  const inputStyle = {
-    width: "100%", boxSizing: "border-box",
-    background: "#1e2235", border: "1px solid #2d3555",
-    color: "#e2e8f0", borderRadius: 10, padding: "12px 14px",
-    fontSize: 16, outline: "none", marginBottom: 10,
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", marginBottom: 4, fontFamily: "Georgia, serif" }}>
-          Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
-        </div>
-        <div style={{ fontSize: 13, color: "#94a3b8", fontFamily: "'Courier New', monospace", marginBottom: 48 }}>Property accounting, simplified.</div>
-        <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 16, padding: 32 }}>
-          <div style={{ fontSize: 16, color: "#cbd5e1", marginBottom: 8 }}>
-            {mode === "login" ? "Sign in to your account" : mode === "signup" ? "Create your account" : "Reset your password"}
-          </div>
-          <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 24 }}>Free to try. No credit card required.</div>
-
-          {mode !== "forgot" && (
-            <>
-              <button onClick={signInWithGoogle} disabled={loading} style={{
-                width: "100%", padding: "14px 0", borderRadius: 12, border: "1px solid #2d3555",
-                background: "#1e2235", color: "#e2e8f0", fontSize: 16, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontWeight: 600, marginBottom: 16
-              }}>
-                <svg width="20" height="20" viewBox="0 0 48 48">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-                </svg>
-                Continue with Google
-              </button>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
-                <span style={{ fontSize: 12, color: "#475569" }}>or</span>
-                <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
-              </div>
-            </>
-          )}
-
-          <form onSubmit={handleEmail}>
-            <input type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required style={inputStyle} />
-            {mode !== "forgot" && (
-              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={{ ...inputStyle, marginBottom: 4 }} />
-            )}
-            {mode === "login" && (
-              <div style={{ textAlign: "right", marginBottom: 16 }}>
-                <button type="button" onClick={() => { setMode("forgot"); setError(""); setSuccess(""); }}
-                  style={{ background: "transparent", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 12 }}>
-                  Forgot password?
-                </button>
-              </div>
-            )}
-            {mode !== "login" && <div style={{ marginBottom: 16 }} />}
-            <button type="submit" disabled={loading} style={{
-              width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
-              background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 600, marginBottom: 12
-            }}>
-              {loading ? "Please wait..." : mode === "login" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Email"}
-            </button>
-          </form>
-
-          {mode !== "forgot" && (
-            <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); setSuccess(""); }}
-              style={{ background: "transparent", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13 }}>
-              {mode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-            </button>
-          )}
-          {mode === "forgot" && (
-            <button onClick={() => { setMode("login"); setError(""); setSuccess(""); }}
-              style={{ background: "transparent", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13 }}>
-              ← Back to sign in
-            </button>
-          )}
-
-          {error && <div style={{ marginTop: 12, color: "#f87171", fontSize: 13 }}>{error}</div>}
-          {success && <div style={{ marginTop: 12, color: "#4ade80", fontSize: 13 }}>{success}</div>}
-        </div>
-        <div style={{ fontSize: 12, color: "#475569", marginTop: 24 }}>
-          By signing in you agree to our <a href="/terms.html" style={{ color: "#3b82f6" }}>Terms of Service</a> and <a href="/privacy.html" style={{ color: "#3b82f6" }}>Privacy Policy</a>.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OnboardingScreen({ session, onComplete }) {
-  const [step, setStep] = useState(1);
-  const [businessName, setBusinessName] = useState("");
-  const [propForm, setPropForm] = useState({ name: "", address: "", property_type: "Residential", note: "" });
-  const [loading, setLoading] = useState(false);
-
-  const inputStyle = {
-    width: "100%", boxSizing: "border-box",
-    background: "#1e2235", border: "1px solid #2d3555",
-    color: "#e2e8f0", borderRadius: 10, padding: "12px 14px",
-    fontSize: 16, outline: "none", marginBottom: 10,
-  };
-
-  async function createBusiness() {
-    if (!businessName.trim()) return;
-    setLoading(true);
-    const { data, error } = await supabase.from("businesses").insert([{
-      name: businessName,
-      owner_id: session.user.id,
-    }]).select().single();
-    if (error) { alert("Error creating business."); setLoading(false); return; }
-    setLoading(false);
-    setStep(2);
-  }
-
-  async function addFirstProperty() {
-    if (!propForm.name.trim()) return;
-    setLoading(true);
-
-    const { data: biz } = await supabase.from("businesses").select("id").eq("owner_id", session.user.id).single();
-    if (!biz) { alert("Business not found."); setLoading(false); return; }
-
-    await supabase.from("properties").insert([{
-      business_id: biz.id,
-      name: propForm.name,
-      address: propForm.address,
-      property_type: propForm.property_type,
-      note: propForm.note,
-      archived: false,
-    }]);
-
-    setLoading(false);
-    onComplete();
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 420 }}>
-        <div style={{ fontSize: 24, fontWeight: 700, color: "#fff", marginBottom: 4, fontFamily: "Georgia, serif", textAlign: "center" }}>
-          Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
-        </div>
-        <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'Courier New', monospace", textAlign: "center", marginBottom: 32 }}>
-          Step {step} of 2 — {step === 1 ? "Name your business" : "Add your first property"}
-        </div>
-
-        <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 16, padding: 28 }}>
-          {step === 1 ? (
-            <>
-              <div style={{ fontSize: 18, color: "#e2e8f0", fontWeight: 600, marginBottom: 6 }}>What's your business called?</div>
-              <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>This is the name that appears on your reports.</div>
-              <input placeholder="e.g. Smith Properties LLC" value={businessName} onChange={e => setBusinessName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && createBusiness()} style={inputStyle} autoFocus />
-              <button onClick={createBusiness} disabled={loading || !businessName.trim()} style={{
-                width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
-                background: businessName.trim() ? "#1d4ed8" : "#1e2235", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 600
-              }}>{loading ? "Creating..." : "Continue →"}</button>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 18, color: "#e2e8f0", fontWeight: 600, marginBottom: 6 }}>Add your first property</div>
-              <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>You can add more properties later.</div>
-              <input placeholder="Property name or address" value={propForm.name} onChange={e => setPropForm(v => ({ ...v, name: e.target.value }))} style={inputStyle} autoFocus />
-              <input placeholder="City, State (e.g. Tulsa, OK)" value={propForm.address} onChange={e => setPropForm(v => ({ ...v, address: e.target.value }))} style={inputStyle} />
-              <select value={propForm.property_type} onChange={e => setPropForm(v => ({ ...v, property_type: e.target.value }))} style={inputStyle}>
-                {PROPERTY_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
-              <input placeholder="Note (optional, e.g. Rented $1,200/mo)" value={propForm.note} onChange={e => setPropForm(v => ({ ...v, note: e.target.value }))} style={inputStyle} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 4 }}>
-                <button onClick={() => setStep(1)} style={{ padding: "14px 0", borderRadius: 12, border: "1px solid #2d3555", background: "transparent", color: "#94a3b8", fontSize: 15, cursor: "pointer" }}>← Back</button>
-                <button onClick={addFirstProperty} disabled={loading || !propForm.name.trim()} style={{
-                  padding: "14px 0", borderRadius: 12, border: "none",
-                  background: propForm.name.trim() ? "#1d4ed8" : "#1e2235", color: "#fff", fontSize: 15, cursor: "pointer", fontWeight: 600
-                }}>{loading ? "Saving..." : "Launch App →"}</button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResetPasswordScreen() {
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState("");
-  const [error, setError] = useState("");
-
-  async function handleReset(e) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) { setError(error.message); }
-    else { setSuccess("Password updated! You can now sign in."); }
-    setLoading(false);
-  }
-
-  const inputStyle = {
-    width: "100%", boxSizing: "border-box",
-    background: "#1e2235", border: "1px solid #2d3555",
-    color: "#e2e8f0", borderRadius: 10, padding: "12px 14px",
-    fontSize: 16, outline: "none", marginBottom: 10,
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", marginBottom: 4, fontFamily: "Georgia, serif" }}>
-          Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
-        </div>
-        <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 16, padding: 32, marginTop: 48 }}>
-          <div style={{ fontSize: 16, color: "#cbd5e1", marginBottom: 24 }}>Set a new password</div>
-          {success ? (
-            <div style={{ color: "#4ade80", fontSize: 14 }}>{success}</div>
-          ) : (
-            <form onSubmit={handleReset}>
-              <input type="password" placeholder="New password" value={password} onChange={e => setPassword(e.target.value)} required style={{ ...inputStyle, marginBottom: 16 }} />
-              <button type="submit" disabled={loading} style={{
-                width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
-                background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 600
-              }}>
-                {loading ? "Updating..." : "Update Password"}
-              </button>
-            </form>
-          )}
-          {error && <div style={{ marginTop: 12, color: "#f87171", fontSize: 13 }}>{error}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
+import Landing from './Landing';
+import { AppContext } from './AppContext';
+import LoginScreen from './components/LoginScreen';
+import OnboardingScreen from './components/OnboardingScreen';
+import ResetPasswordScreen from './components/ResetPasswordScreen';
+import DashboardTab from './components/DashboardTab';
+import TransactionsTab from './components/TransactionsTab';
+import ImportTab from './components/ImportTab';
+import MonthlyPLTab from './components/MonthlyPLTab';
+import RecurringTab from './components/RecurringTab';
+import NotesTab from './components/NotesTab';
+import PropertiesTab from './components/PropertiesTab';
+import TaxReportTab from './components/TaxReportTab';
+import BillingTab from './components/BillingTab';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -332,93 +26,32 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [properties, setProperties] = useState([]);
   const [recurring, setRecurring] = useState([]);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [filterProp, setFilterProp] = useState("all");
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newTx, setNewTx] = useState({ property_id: "", transaction_date: "", description: "", category: "", amount: "", type: "income" });
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [filterProp, setFilterProp] = useState('all');
   const [dataLoading, setDataLoading] = useState(true);
-  const [selectedTxIds, setSelectedTxIds] = useState([]);
-
-  // Property editor state
-  const [showPropEditor, setShowPropEditor] = useState(false);
-  const [editingProp, setEditingProp] = useState(null);
-  const [propForm, setPropForm] = useState({ name: "", address: "", property_type: "Residential", note: "", archived: false });
-
-  // Recurring state
-  const [showRecurringForm, setShowRecurringForm] = useState(false);
-  const [editingRecurring, setEditingRecurring] = useState(null);
-  const [recurringForm, setRecurringForm] = useState({ property_id: "", description: "", amount: "", type: "income", category: "", frequency: "monthly", day_of_month: 1, next_due_date: "", end_date: "" });
-
-  // Notes state
-  const [generalNote, setGeneralNote] = useState({ id: null, content: "" });
-  const [generalNoteSaving, setGeneralNoteSaving] = useState(false);
+  const [subscription, setSubscription] = useState({ status: 'free' });
+  const [generalNote, setGeneralNote] = useState({ id: null, content: '' });
   const [propertyNotes, setPropertyNotes] = useState({});
-  const [propertyNotesSaving, setPropertyNotesSaving] = useState({});
-
-  // Subscription state
-  const [subscription, setSubscription] = useState({ status: "free" });
-
-  // Import state
-  const [importStep, setImportStep] = useState("upload"); // "upload" | "preview" | "done"
-  const [importRows, setImportRows] = useState([]);
-  const [importParsing, setImportParsing] = useState(false);
-  const [importError, setImportError] = useState(null);
-  const [importDoneCount, setImportDoneCount] = useState(0);
-  const [importPasteText, setImportPasteText] = useState("");
-  const [importDragging, setImportDragging] = useState(false);
-  const importDropRef = useRef(null);
-  const [importFileName, setImportFileName] = useState("");
-  const [showImportBatches, setShowImportBatches] = useState(false);
-  const [importDuplicates, setImportDuplicates] = useState([]); // [{ existing, imported }]
-
-  // Transaction filter/sort state
-  const [txSort, setTxSort] = useState("date-desc");
-  const [txFilterType, setTxFilterType] = useState("all");
-  const [txFilterCat, setTxFilterCat] = useState("all");
-
-  // Recurring filter state
-  const [recurFilterProp, setRecurFilterProp] = useState("all");
-  const [recurFilterType, setRecurFilterType] = useState("all");
-  const [recurFilterFreq, setRecurFilterFreq] = useState("all");
-
-  // Year / quarter filter state for Monthly P&L, Dashboard, and Tax Report tabs
-  const [pnlYear, setPnlYear] = useState(String(new Date().getFullYear()));
-  const [pnlQuarter, setPnlQuarter] = useState("all");
-  const [dashYear, setDashYear] = useState(String(new Date().getFullYear()));
-  const [dashQuarter, setDashQuarter] = useState("all");
-  const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
-  const [taxQuarter, setTaxQuarter] = useState("all");
-
-  const inputStyle = {
-    width: "100%", boxSizing: "border-box",
-    background: "#1e2235", border: "1px solid #2d3555",
-    color: "#e2e8f0", borderRadius: 10, padding: "12px 14px",
-    fontSize: 16, outline: "none",
-  };
 
   useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION immediately — no need for getSession()
-    // which would set session twice and trigger loadData twice
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (_event === "PASSWORD_RECOVERY") setIsResettingPassword(true);
-      if (_event === "SIGNED_IN") window.history.replaceState({}, document.title, "/");
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === 'PASSWORD_RECOVERY') setIsResettingPassword(true);
+      if (_event === 'SIGNED_IN') window.history.replaceState({}, document.title, '/');
       setSession(session);
       setAuthLoading(false);
     });
-    return () => subscription.unsubscribe();
+    return () => authSub.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!session && showLogin) {
-      supabase.auth.signOut();
-    }
+    if (!session && showLogin) supabase.auth.signOut();
   }, [session, showLogin]);
 
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     async function loadData() {
-      const { data: bizData } = await supabase.from("businesses").select("*").eq("owner_id", session.user.id).order("created_at", { ascending: true }).limit(1).maybeSingle();
+      const { data: bizData } = await supabase.from('businesses').select('*').eq('owner_id', session.user.id).order('created_at', { ascending: true }).limit(1).maybeSingle();
       if (cancelled) return;
       if (!bizData) { setNeedsOnboarding(true); setDataLoading(false); return; }
       setBusiness(bizData);
@@ -427,171 +60,75 @@ export default function App() {
         { data: txData, error: txErr },
         { data: propData, error: propErr },
         { data: recurData, error: recurErr },
-        { data: notesData, error: notesErr }
+        { data: notesData, error: notesErr },
       ] = await Promise.all([
-        supabase.from("transactions").select("*").eq("business_id", bizData.id).order("transaction_date", { ascending: true }),
-        supabase.from("properties").select("*").eq("business_id", bizData.id).eq("archived", false).order("name"),
-        supabase.from("recurring_transactions").select("*").eq("business_id", bizData.id).eq("active", true).order("next_due_date"),
-        supabase.from("notes").select("*").eq("business_id", bizData.id).order("updated_at", { ascending: false })
+        supabase.from('transactions').select('*').eq('business_id', bizData.id).order('transaction_date', { ascending: true }),
+        supabase.from('properties').select('*').eq('business_id', bizData.id).eq('archived', false).order('name'),
+        supabase.from('recurring_transactions').select('*').eq('business_id', bizData.id).eq('active', true).order('next_due_date'),
+        supabase.from('notes').select('*').eq('business_id', bizData.id).order('updated_at', { ascending: false }),
       ]);
 
       if (cancelled) return;
 
-      if (txErr) console.error("[load] transactions error:", txErr.message);
-      if (propErr) console.error("[load] properties error:", propErr.message);
-      if (recurErr) console.error("[load] recurring error:", recurErr.message);
-      if (notesErr) console.error("[load] notes error:", notesErr.message);
+      if (txErr) console.error('[load] transactions error:', txErr.message);
+      if (propErr) console.error('[load] properties error:', propErr.message);
+      if (recurErr) console.error('[load] recurring error:', recurErr.message);
+      if (notesErr) console.error('[load] notes error:', notesErr.message);
 
       if (txData) setTransactions(txData);
-      if (propData) {
-        setProperties(propData);
-        if (propData.length > 0) setNewTx(v => ({ ...v, property_id: propData[0].id }));
-      }
+      if (propData) setProperties(propData);
       if (recurData) setRecurring(recurData);
       if (notesData) {
         const general = notesData.find(n => !n.property_id);
-        if (general) setGeneralNote({ id: general.id, content: general.content || "" });
+        if (general) setGeneralNote({ id: general.id, content: general.content || '' });
         const propNotes = {};
         notesData.filter(n => n.property_id).forEach(n => {
-          if (!propNotes[n.property_id]) propNotes[n.property_id] = { id: n.id, content: n.content || "" };
+          if (!propNotes[n.property_id]) propNotes[n.property_id] = { id: n.id, content: n.content || '' };
         });
         setPropertyNotes(propNotes);
       }
 
-      // Load subscription
-      const { data: subData } = await supabase.from("subscriptions").select("*").eq("business_id", bizData.id).maybeSingle();
+      const { data: subData } = await supabase.from('subscriptions').select('*').eq('business_id', bizData.id).maybeSingle();
       if (!cancelled && subData) setSubscription(subData);
 
-      // Handle successful Stripe checkout redirect
       const params = new URLSearchParams(window.location.search);
-      if (params.get("success") === "true") {
-        await supabase.from("subscriptions").upsert([{ business_id: bizData.id, status: "pro" }], { onConflict: "business_id" });
+      if (params.get('success') === 'true') {
+        await supabase.from('subscriptions').upsert([{ business_id: bizData.id, status: 'pro' }], { onConflict: 'business_id' });
         if (!cancelled) {
-          setSubscription({ status: "pro" });
-          window.history.replaceState({}, "", "/");
+          setSubscription({ status: 'pro' });
+          window.history.replaceState({}, '', '/');
         }
       }
 
       if (!cancelled) setDataLoading(false);
 
-      // Auto backfill
       try {
-        await fetch("/api/post-recurring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ business_id: bizData.id }) });
+        await fetch('/api/post-recurring', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ business_id: bizData.id }) });
         if (cancelled) return;
-        const { data: freshTx } = await supabase.from("transactions").select("*").eq("business_id", bizData.id).order("transaction_date", { ascending: true });
+        const { data: freshTx } = await supabase.from('transactions').select('*').eq('business_id', bizData.id).order('transaction_date', { ascending: true });
         if (!cancelled && freshTx) setTransactions(freshTx);
-        const { data: freshRecur } = await supabase.from("recurring_transactions").select("*").eq("business_id", bizData.id).eq("active", true).order("next_due_date");
+        const { data: freshRecur } = await supabase.from('recurring_transactions').select('*').eq('business_id', bizData.id).eq('active', true).order('next_due_date');
         if (!cancelled && freshRecur) setRecurring(freshRecur);
-      } catch(e) { console.error("Backfill error:", e); }
+      } catch (e) { console.error('Backfill error:', e); }
     }
     loadData();
     return () => { cancelled = true; };
   }, [session]);
 
-  useEffect(() => {
-    if (importStep === "duplicates" && importDuplicates.length === 0) {
-      setImportStep("done");
-    }
-  }, [importStep, importDuplicates]);
-
   async function runBackfill() {
     if (!business) return;
     try {
-      await fetch("/api/post-recurring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ business_id: business.id }) });
-      const { data: txData } = await supabase.from("transactions").select("*").eq("business_id", business.id).order("transaction_date", { ascending: true });
+      await fetch('/api/post-recurring', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ business_id: business.id }) });
+      const { data: txData } = await supabase.from('transactions').select('*').eq('business_id', business.id).order('transaction_date', { ascending: true });
       if (txData) setTransactions(txData);
-      const { data: recurData } = await supabase.from("recurring_transactions").select("*").eq("business_id", business.id).eq("active", true).order("next_due_date");
+      const { data: recurData } = await supabase.from('recurring_transactions').select('*').eq('business_id', business.id).eq('active', true).order('next_due_date');
       if (recurData) setRecurring(recurData);
-    } catch(e) { console.error("Backfill error:", e); }
+    } catch (e) { console.error('Backfill error:', e); }
   }
-
-  async function addTransaction(tx) {
-    const { data, error } = await supabase.from("transactions").insert([{
-      business_id: business.id,
-      property_id: tx.property_id === "all" ? null : tx.property_id,
-      transaction_date: tx.transaction_date,
-      description: tx.description,
-      category: tx.category || null,
-      amount: tx.amount,
-      type: tx.type,
-      source: "manual",
-    }]).select().single();
-    if (error) { console.error(error); alert("Error saving."); }
-    else { setTransactions(prev => [...prev, data]); runBackfill(); }
-  }
-
-  async function deleteTransaction(id) {
-    if (!window.confirm("Delete this transaction?")) return;
-    const { error } = await supabase.from("transactions").delete().eq("id", id);
-    if (error) { alert("Error deleting."); }
-    else setTransactions(prev => prev.filter(t => t.id !== id));
-  }
-
-  function submitManual(e) {
-    e.preventDefault();
-    const amount = parseFloat(newTx.amount) * (newTx.type === "expense" ? -1 : 1);
-    addTransaction({ ...newTx, amount });
-    setNewTx(v => ({ ...v, transaction_date: "", description: "", category: "", amount: "", type: "income" }));
-    setShowAddForm(false);
-  }
-
-  function openAddProperty() {
-    setEditingProp(null);
-    setPropForm({ name: "", address: "", property_type: "Residential", note: "", archived: false });
-    setShowPropEditor(true);
-  }
-
-  function openEditProperty(prop) {
-    setEditingProp(prop);
-    setPropForm({ name: prop.name, address: prop.address || "", property_type: prop.property_type || "Residential", note: prop.note || "", archived: prop.archived || false });
-    setShowPropEditor(true);
-  }
-
-  async function saveProperty(e) {
-    e.preventDefault();
-    if (editingProp) {
-      const { data, error } = await supabase.from("properties").update({
-        name: propForm.name, address: propForm.address, property_type: propForm.property_type, note: propForm.note, archived: propForm.archived
-      }).eq("id", editingProp.id).select().single();
-      if (error) { alert("Error saving property."); return; }
-      setProperties(prev => propForm.archived ? prev.filter(p => p.id !== editingProp.id) : prev.map(p => p.id === editingProp.id ? data : p));
-    } else {
-      const { data, error } = await supabase.from("properties").insert([{
-        business_id: business.id, name: propForm.name, address: propForm.address,
-        property_type: propForm.property_type, note: propForm.note, archived: false
-      }]).select().single();
-      if (error) { alert("Error adding property."); return; }
-      setProperties(prev => [...prev, data]);
-    }
-    setShowPropEditor(false);
-  }
-
-  const propStats = useMemo(() => {
-    return properties.map(prop => {
-      const txs = transactions.filter(t => t.property_id === prop.id);
-      const income = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-      const expenses = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-      return { ...prop, income, expenses, net: income - expenses, txCount: txs.length };
-    });
-  }, [transactions, properties]);
-
-  const totalIncome = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = transactions.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const totalNet = totalIncome - totalExpenses;
-  const filtered = filterProp === "all" ? transactions : transactions.filter(t => t.property_id === filterProp);
-
-  const taxSummary = useMemo(() => {
-    const cats = {};
-    transactions.filter(t => t.amount < 0).forEach(t => {
-      const label = TAX_CATEGORIES[t.category] || "Miscellaneous";
-      cats[label] = (cats[label] || 0) + Math.abs(t.amount);
-    });
-    return cats;
-  }, [transactions]);
 
   const importBatches = useMemo(() => {
     const batched = {};
-    transactions.filter(t => t.source === "import" && t.batch_id).forEach(t => {
+    transactions.filter(t => t.source === 'import' && t.batch_id).forEach(t => {
       if (!batched[t.batch_id]) batched[t.batch_id] = [];
       batched[t.batch_id].push(t);
     });
@@ -606,46 +143,33 @@ export default function App() {
     })).sort((a, b) => b.importedAt.localeCompare(a.importedAt));
   }, [transactions]);
 
-  const displayTxs = useMemo(() => {
-    let rows = filterProp === "all" ? [...transactions] : transactions.filter(t => t.property_id === filterProp);
-    if (txFilterType !== "all") rows = rows.filter(t => t.type === txFilterType);
-    if (txFilterCat !== "all") rows = rows.filter(t => (t.category || "") === txFilterCat);
-    if (txSort === "date-desc") rows.reverse();
-    else if (txSort === "amount-desc") rows.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-    else if (txSort === "amount-asc") rows.sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
-    return rows;
-  }, [transactions, filterProp, txSort, txFilterType, txFilterCat]);
-
-  const displayRecurring = useMemo(() => {
-    let rows = [...recurring];
-    if (recurFilterProp !== "all") rows = rows.filter(r => r.property_id === recurFilterProp);
-    if (recurFilterType !== "all") rows = rows.filter(r => r.type === recurFilterType);
-    if (recurFilterFreq !== "all") rows = rows.filter(r => r.frequency === recurFilterFreq);
-    return rows;
-  }, [recurring, recurFilterProp, recurFilterType, recurFilterFreq]);
-
   const tabs = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "transactions", label: "Transactions" },
-    { id: "import", label: "Import" },
-    { id: "monthly", label: "Monthly P&L" },
-    { id: "recurring", label: "Recurring" },
-    { id: "notes", label: "Notes" },
-    { id: "properties", label: "Properties" },
-    { id: "tax report", label: "Tax Report" },
-    { id: "billing", label: "⭐ Pro" },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'import', label: 'Import' },
+    { id: 'monthly', label: 'Monthly P&L' },
+    { id: 'recurring', label: 'Recurring' },
+    { id: 'notes', label: 'Notes' },
+    { id: 'properties', label: 'Properties' },
+    { id: 'tax report', label: 'Tax Report' },
+    { id: 'billing', label: '⭐ Pro' },
   ];
 
-  const typeColor = (type) => {
-    if (type === "Residential") return { bg: "#1e3a5f", text: "#93c5fd" };
-    if (type === "Airbnb") return { bg: "#2d1b69", text: "#a78bfa" };
-    if (type === "For Sale") return { bg: "#422006", text: "#fb923c" };
-    if (type === "Under Construction") return { bg: "#1a3a2a", text: "#86efac" };
-    return { bg: "#1e2235", text: "#94a3b8" };
+  const contextValue = {
+    session, business, subscription,
+    transactions, setTransactions,
+    properties, setProperties,
+    recurring, setRecurring,
+    activeTab, setActiveTab,
+    filterProp, setFilterProp,
+    generalNote, setGeneralNote,
+    propertyNotes, setPropertyNotes,
+    importBatches,
+    runBackfill,
   };
 
   if (authLoading) return (
-    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>Loading...</div>
+    <div style={{ minHeight: '100vh', background: '#080b12', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontFamily: "'Courier New', monospace" }}>Loading...</div>
   );
 
   if (isResettingPassword) return <ResetPasswordScreen />;
@@ -653,1731 +177,116 @@ export default function App() {
     if (showLogin) return <LoginScreen />;
     return <Landing onGetStarted={() => setShowLogin(true)} />;
   }
-
   if (needsOnboarding) return <OnboardingScreen session={session} onComplete={() => { setNeedsOnboarding(false); setDataLoading(true); window.location.reload(); }} />;
 
-  // Paywall check — trial expired and not subscribed
   const trialEnd = business?.trial_ends_at ? new Date(business.trial_ends_at) : null;
   const trialExpired = trialEnd && trialEnd < new Date();
-  const isPro = subscription.status === "pro";
+  const isPro = subscription.status === 'pro';
 
   if (!dataLoading && trialExpired && !isPro) return (
-    <div style={{ minHeight: "100vh", background: "#080b12", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", marginBottom: 4, fontFamily: "Georgia, serif" }}>
-          Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
-        </div>
-        <div style={{ background: "#0f1117", border: "1px solid #f87171", borderRadius: 16, padding: 32, marginTop: 32 }}>
-          <div style={{ fontSize: 24, marginBottom: 12 }}>🔒</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#f87171", marginBottom: 8 }}>Your free trial has ended</div>
-          <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 28 }}>Subscribe to keep access to your properties, transactions, and reports. Your data is safe and waiting for you.</div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <button onClick={async () => {
-              try {
-                const res = await fetch("/api/create-checkout", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "monthly" })
-                });
-                const data = await res.json();
-                if (data.url) window.location.href = data.url;
-                else alert("Error: " + (data.error || "Unknown error"));
-              } catch(e) { alert("Error: " + e.message); }
-            }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "1px solid #2d3555", background: "#1e2235", color: "#e2e8f0", fontSize: 16, cursor: "pointer", fontWeight: 600 }}>
-              Monthly — $12/mo
-            </button>
-            <button onClick={async () => {
-              try {
-                const res = await fetch("/api/create-checkout", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "annual" })
-                });
-                const data = await res.json();
-                if (data.url) window.location.href = data.url;
-                else alert("Error: " + (data.error || "Unknown error"));
-              } catch(e) { alert("Error: " + e.message); }
-            }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
-              Annual — $99/year 🏆 Best Value
-            </button>
+    <AppContext.Provider value={contextValue}>
+      <div style={{ minHeight: '100vh', background: '#080b12', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ width: '100%', maxWidth: 420, textAlign: 'center' }}>
+          <div style={{ fontSize: 32, fontWeight: 700, color: '#fff', marginBottom: 4, fontFamily: 'Georgia, serif' }}>
+            Landlord<span style={{ color: '#3b82f6' }}>Ledger</span>
           </div>
-          <button onClick={() => supabase.auth.signOut()} style={{ marginTop: 20, background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: 13 }}>
-            Sign out
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#080b12", color: "#e2e8f0", fontFamily: "Georgia, serif", overflowX: "hidden" }}>
-      <style>{`
-        @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; }
-        input::placeholder { color: #94a3b8 !important; }
-        select option { background: #0f1117; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #080b12; }
-        ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #60a5fa; }
-      `}</style>
-
-      {/* AI parsing overlay — blocks all interaction while Claude processes */}
-      {importParsing && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(8,11,18,0.85)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "all" }}>
-          <div style={{ background: "#0f1117", border: "1px solid #2d3555", borderRadius: 18, padding: "36px 32px", maxWidth: 340, width: "90%", textAlign: "center" }}>
-            <div style={{ width: 48, height: 48, border: "4px solid #1e2235", borderTop: "4px solid #3b82f6", borderRadius: "50%", animation: "spin 0.9s linear infinite", margin: "0 auto 20px" }} />
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#e2e8f0", marginBottom: 10 }}>Processing your file with AI…</div>
-            <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>This may take 30–60 seconds.<br />Please do not close this page or upload another file.</div>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div style={{ background: "#0a0d16", borderBottom: "1px solid #1e2235", padding: "16px 16px 0", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>
-            Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>{business?.name}</span>
-            <button onClick={() => supabase.auth.signOut()} style={{ background: "transparent", border: "1px solid #1e2235", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 12, fontFamily: "'Courier New', monospace" }}>
+          <div style={{ background: '#0f1117', border: '1px solid #f87171', borderRadius: 16, padding: 32, marginTop: 32 }}>
+            <div style={{ fontSize: 24, marginBottom: 12 }}>🔒</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#f87171', marginBottom: 8 }}>Your free trial has ended</div>
+            <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>Subscribe to keep access to your properties, transactions, and reports. Your data is safe and waiting for you.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <button onClick={async () => {
+                try {
+                  const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: 'monthly' }) });
+                  const data = await res.json();
+                  if (data.url) window.location.href = data.url;
+                  else alert('Error: ' + (data.error || 'Unknown error'));
+                } catch (e) { alert('Error: ' + e.message); }
+              }} style={{ width: '100%', padding: '14px 0', borderRadius: 12, border: '1px solid #2d3555', background: '#1e2235', color: '#e2e8f0', fontSize: 16, cursor: 'pointer', fontWeight: 600 }}>
+                Monthly — $12/mo
+              </button>
+              <button onClick={async () => {
+                try {
+                  const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: 'annual' }) });
+                  const data = await res.json();
+                  if (data.url) window.location.href = data.url;
+                  else alert('Error: ' + (data.error || 'Unknown error'));
+                } catch (e) { alert('Error: ' + e.message); }
+              }} style={{ width: '100%', padding: '14px 0', borderRadius: 12, border: 'none', background: '#1d4ed8', color: '#fff', fontSize: 16, cursor: 'pointer', fontWeight: 700 }}>
+                Annual — $99/year 🏆 Best Value
+              </button>
+            </div>
+            <button onClick={() => supabase.auth.signOut()} style={{ marginTop: 20, background: 'transparent', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 13 }}>
               Sign out
             </button>
           </div>
         </div>
-        <div style={{ position: "relative" }}>
-          <div style={{ display: "flex", gap: 2, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "thin", marginTop: 10, paddingBottom: 3 }}>
-            {tabs.map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-                flexShrink: 0, padding: "10px 14px", fontSize: 13,
-                fontFamily: "'Courier New', monospace", letterSpacing: 0.5,
-                textTransform: "uppercase", cursor: "pointer", border: "none",
-                background: activeTab === t.id ? "#1d4ed8" : "transparent",
-                color: activeTab === t.id ? "#fff" : "#94a3b8",
-                borderRadius: "8px 8px 0 0", whiteSpace: "nowrap",
-              }}>{t.label}</button>
-            ))}
+      </div>
+    </AppContext.Provider>
+  );
+
+  return (
+    <AppContext.Provider value={contextValue}>
+      <div style={{ minHeight: '100vh', width: '100%', background: '#080b12', color: '#e2e8f0', fontFamily: 'Georgia, serif', overflowX: 'hidden' }}>
+        <style>{`
+          @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          * { box-sizing: border-box; }
+          input::placeholder { color: #94a3b8 !important; }
+          select option { background: #0f1117; }
+          ::-webkit-scrollbar { width: 8px; height: 8px; }
+          ::-webkit-scrollbar-track { background: #080b12; }
+          ::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; }
+          ::-webkit-scrollbar-thumb:hover { background: #60a5fa; }
+        `}</style>
+
+        <div style={{ background: '#0a0d16', borderBottom: '1px solid #1e2235', padding: '16px 16px 0', position: 'sticky', top: 0, zIndex: 100 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>
+              Landlord<span style={{ color: '#3b82f6' }}>Ledger</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>{business?.name}</span>
+              <button onClick={() => supabase.auth.signOut()} style={{ background: 'transparent', border: '1px solid #1e2235', borderRadius: 8, padding: '6px 12px', color: '#94a3b8', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" }}>
+                Sign out
+              </button>
+            </div>
           </div>
-          <div style={{ position: "absolute", right: 0, top: 10, bottom: 3, width: 40, background: "linear-gradient(to right, transparent, #0a0d16)", pointerEvents: "none" }} />
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', gap: 2, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', marginTop: 10, paddingBottom: 3 }}>
+              {tabs.map(t => (
+                <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                  flexShrink: 0, padding: '10px 14px', fontSize: 13,
+                  fontFamily: "'Courier New', monospace", letterSpacing: 0.5,
+                  textTransform: 'uppercase', cursor: 'pointer', border: 'none',
+                  background: activeTab === t.id ? '#1d4ed8' : 'transparent',
+                  color: activeTab === t.id ? '#fff' : '#94a3b8',
+                  borderRadius: '8px 8px 0 0', whiteSpace: 'nowrap',
+                }}>{t.label}</button>
+              ))}
+            </div>
+            <div style={{ position: 'absolute', right: 0, top: 10, bottom: 3, width: 40, background: 'linear-gradient(to right, transparent, #0a0d16)', pointerEvents: 'none' }} />
+          </div>
+        </div>
+
+        <div style={{ padding: '20px 16px 40px' }}>
+          {dataLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontFamily: "'Courier New', monospace" }}>Loading your books...</div>
+          ) : (
+            <>
+              {activeTab === 'dashboard'    && <DashboardTab />}
+              {activeTab === 'transactions' && <TransactionsTab />}
+              {activeTab === 'import'       && <ImportTab />}
+              {activeTab === 'monthly'      && <MonthlyPLTab />}
+              {activeTab === 'recurring'    && <RecurringTab />}
+              {activeTab === 'notes'        && <NotesTab />}
+              {activeTab === 'properties'   && <PropertiesTab />}
+              {activeTab === 'tax report'   && <TaxReportTab />}
+              {activeTab === 'billing'      && <BillingTab />}
+            </>
+          )}
         </div>
       </div>
-
-      <div style={{ padding: "20px 16px 40px" }}>
-        {dataLoading ? (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>Loading your books...</div>
-        ) : (
-          <>
-            {/* DASHBOARD */}
-            {activeTab === "dashboard" && (() => {
-              const dashYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
-              const nowYear = String(new Date().getFullYear());
-              if (!dashYears.includes(nowYear)) dashYears.unshift(nowYear);
-              const dashTxs = transactions.filter(t => {
-                if (!t.transaction_date) return false;
-                if (dashYear !== "all" && t.transaction_date.slice(0,4) !== dashYear) return false;
-                if (dashQuarter !== "all") {
-                  const m = parseInt(t.transaction_date.slice(5,7));
-                  if (Math.ceil(m / 3) !== parseInt(dashQuarter)) return false;
-                }
-                return true;
-              });
-              const dashIncome   = dashTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-              const dashExpenses = dashTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-              const dashNet      = dashIncome - dashExpenses;
-              const filteredPropStats = properties.map(prop => {
-                const txs = dashTxs.filter(t => t.property_id === prop.id);
-                const inc = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-                const exp = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-                return { ...prop, income: inc, expenses: exp, net: inc - exp, txCount: txs.length };
-              });
-              const periodLabel = dashYear === "all" ? "ALL TIME" : dashQuarter === "all" ? dashYear : `Q${dashQuarter} ${dashYear}`;
-              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
-              return (
-                <>
-                  <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                    <select value={dashYear} onChange={e => setDashYear(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Years</option>
-                      {dashYears.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                    <select value={dashQuarter} onChange={e => setDashQuarter(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Quarters</option>
-                      <option value="1">Q1 — Jan–Mar</option>
-                      <option value="2">Q2 — Apr–Jun</option>
-                      <option value="3">Q3 — Jul–Sep</option>
-                      <option value="4">Q4 — Oct–Dec</option>
-                    </select>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                    <div style={{ background: "#0f1117", border: "1px solid #14532d", borderRadius: 12, padding: "14px" }}>
-                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL INCOME</div>
-                      <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80" }}>{fmt(dashIncome)}</div>
-                    </div>
-                    <div style={{ background: "#0f1117", border: "1px solid #7f1d1d", borderRadius: 12, padding: "14px" }}>
-                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>TOTAL EXPENSES</div>
-                      <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(dashExpenses)}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ background: "#0f1117", border: `1px solid ${dashNet >= 0 ? "#14532d" : "#7f1d1d"}`, borderRadius: 12, padding: "14px", marginBottom: 20 }}>
-                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 6 }}>NET PROFIT / LOSS — {periodLabel}</div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: dashNet >= 0 ? "#4ade80" : "#f87171" }}>{fmt(dashNet)}</div>
-                  </div>
-
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>PORTFOLIO — {properties.length} UNITS</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {filteredPropStats.map(p => {
-                      const tc = typeColor(p.property_type);
-                      return (
-                        <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: "16px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                            <div style={{ flex: 1, marginRight: 12 }}>
-                              <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 2 }}>{p.name}</div>
-                              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
-                              <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
-                            </div>
-                            <div style={{ textAlign: "right" }}>
-                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net P&L</div>
-                              <div style={{ fontSize: 18, fontWeight: 700, color: p.net > 0 ? "#4ade80" : p.net < 0 ? "#f87171" : "#94a3b8" }}>
-                                {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
-                              </div>
-                            </div>
-                          </div>
-                          {p.note && <div style={{ fontSize: 12, color: "#94a3b8", borderTop: "1px solid #1e2235", paddingTop: 8, marginTop: 6 }}>{p.note}</div>}
-                          {(p.income > 0 || p.expenses > 0) && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10, marginTop: 10 }}>
-                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
-                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
-                              <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Txns</div><div style={{ fontSize: 13, color: "#cbd5e1" }}>{p.txCount}</div></div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {properties.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>
-                        No properties yet. <span onClick={() => setActiveTab("properties")} style={{ color: "#3b82f6", cursor: "pointer" }}>Add one →</span>
-                      </div>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-
-            {/* TRANSACTIONS */}
-            {activeTab === "transactions" && (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 }}>
-                  <select value={filterProp} onChange={e => setFilterProp(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
-                    <option value="all">All properties</option>
-                    {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <button onClick={() => setShowAddForm(v => !v)} style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "12px 16px", color: "#fff", cursor: "pointer", fontSize: 15, fontWeight: 600, whiteSpace: "nowrap" }}>+ Add</button>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                  <select value={txSort} onChange={e => setTxSort(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 120, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="date-desc">Newest First</option>
-                    <option value="date-asc">Oldest First</option>
-                    <option value="amount-desc">Largest First</option>
-                    <option value="amount-asc">Smallest First</option>
-                  </select>
-                  <select value={txFilterType} onChange={e => setTxFilterType(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 100, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="all">All Types</option>
-                    <option value="income">Income Only</option>
-                    <option value="expense">Expenses Only</option>
-                  </select>
-                  <select value={txFilterCat} onChange={e => setTxFilterCat(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 130, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="all">All Categories</option>
-                    <option value="Income / Rent">Income / Rent</option>
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-
-                {filterProp !== "all" && (
-                  <button onClick={() => { const prop = properties.find(p => p.id === filterProp); if (prop) printProperty(prop, transactions); }}
-                    style={{ width: "100%", marginBottom: 12, background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 10, padding: "10px 0", color: "#4ade80", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-                    🖨️ Print / Export This Property
-                  </button>
-                )}
-
-                {displayTxs.length > 0 && (
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
-                    <button onClick={() => setSelectedTxIds(selectedTxIds.length === displayTxs.length ? [] : displayTxs.map(t => t.id))}
-                      style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "8px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>
-                      {selectedTxIds.length === displayTxs.length ? "Deselect All" : "Select All"}
-                    </button>
-                    {selectedTxIds.length > 0 && (
-                      <button onClick={async () => {
-                        if (!window.confirm(`Delete ${selectedTxIds.length} transaction(s)?`)) return;
-                        const { error } = await supabase.from("transactions").delete().in("id", selectedTxIds);
-                        if (!error) { setTransactions(prev => prev.filter(t => !selectedTxIds.includes(t.id))); setSelectedTxIds([]); }
-                      }} style={{ background: "#7f1d1d", border: "1px solid #f87171", borderRadius: 8, padding: "8px 14px", color: "#f87171", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                        🗑️ Delete {selectedTxIds.length} Selected
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {showAddForm && (
-                  <form onSubmit={submitManual} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={newTx.property_id} onChange={e => setNewTx(v => ({ ...v, property_id: e.target.value }))} style={inputStyle}>
-                      <option value="all">All Properties (shared expense)</option>
-                      {properties.map(p => <option key={p.id} value={p.id}>{p.name} — {p.address}</option>)}
-                    </select>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <input type="date" value={newTx.transaction_date} onChange={e => setNewTx(v => ({ ...v, transaction_date: e.target.value }))} required style={inputStyle} />
-                      <select value={newTx.type} onChange={e => setNewTx(v => ({ ...v, type: e.target.value }))} style={inputStyle}>
-                        <option value="income">Income</option>
-                        <option value="expense">Expense</option>
-                      </select>
-                    </div>
-                    <input placeholder="Description" value={newTx.description} onChange={e => setNewTx(v => ({ ...v, description: e.target.value }))} required style={inputStyle} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <select value={newTx.category} onChange={e => setNewTx(v => ({ ...v, category: e.target.value }))} style={inputStyle}>
-                        <option value="">Income / Rent</option>
-                        {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                      <input type="number" placeholder="Amount" value={newTx.amount} onChange={e => setNewTx(v => ({ ...v, amount: e.target.value }))} required style={inputStyle} />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <button type="submit" style={{ background: "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", cursor: "pointer", fontSize: 15, padding: "12px 0", fontWeight: 600 }}>Save</button>
-                      <button type="button" onClick={() => setShowAddForm(false)} style={{ background: "#1e2235", border: "none", borderRadius: 10, color: "#94a3b8", cursor: "pointer", fontSize: 15, padding: "12px 0" }}>Cancel</button>
-                    </div>
-                  </form>
-                )}
-
-                {importBatches.length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <button onClick={() => setShowImportBatches(v => !v)}
-                      style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: showImportBatches ? "10px 10px 0 0" : 10, padding: "10px 14px", width: "100%", textAlign: "left", color: "#94a3b8", cursor: "pointer", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>📥 Import Batches ({importBatches.length})</span>
-                      <span style={{ fontSize: 11 }}>{showImportBatches ? "▲" : "▼"}</span>
-                    </button>
-                    {showImportBatches && (
-                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderTop: "none", borderRadius: "0 0 10px 10px" }}>
-                        {importBatches.map(batch => (
-                          <div key={batch.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #1e2235" }}>
-                            <div>
-                              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{batch.count} transaction{batch.count !== 1 ? "s" : ""}</div>
-                              <div style={{ fontSize: 11, color: "#64748b" }}>{batch.dateRange.from} → {batch.dateRange.to}</div>
-                              <div style={{ fontSize: 11, color: "#4b5563" }}>Imported {new Date(batch.importedAt).toLocaleDateString()}</div>
-                            </div>
-                            <button onClick={async () => {
-                              if (!window.confirm(`Delete all ${batch.count} transactions from this import batch?`)) return;
-                              const { error } = await supabase.from("transactions").delete().eq("batch_id", batch.id);
-                              if (!error) setTransactions(prev => prev.filter(t => t.batch_id !== batch.id));
-                            }} style={{ background: "#7f1d1d", border: "1px solid #f87171", borderRadius: 8, padding: "7px 12px", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-                              🗑️ Delete Batch
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {displayTxs.map((tx) => {
-                    const isSelected = selectedTxIds.includes(tx.id);
-                    return (
-                      <div key={tx.id} onClick={() => setSelectedTxIds(prev => isSelected ? prev.filter(id => id !== tx.id) : [...prev, tx.id])}
-                        style={{ background: isSelected ? "#1a2540" : "#0f1117", border: `1px solid ${isSelected ? "#3b82f6" : "#1e2235"}`, borderRadius: 12, padding: "14px 16px", cursor: "pointer" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, marginRight: 12 }}>
-                            <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${isSelected ? "#3b82f6" : "#2d3555"}`, background: isSelected ? "#3b82f6" : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              {isSelected && <span style={{ color: "#fff", fontSize: 12 }}>✓</span>}
-                            </div>
-                            <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600 }}>{tx.description}</div>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ fontSize: 17, fontWeight: 700, color: tx.amount >= 0 ? "#4ade80" : "#f87171", whiteSpace: "nowrap" }}>{fmt(tx.amount)}</div>
-                            <button onClick={e => { e.stopPropagation(); deleteTransaction(tx.id); }} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16, padding: "0 4px" }} title="Delete">✕</button>
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, paddingLeft: 28 }}>
-                          {tx.property_id ? (properties.find(p => p.id === tx.property_id)?.name || "Unknown") : "Shared / All Properties"}
-                        </div>
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", paddingLeft: 28 }}>
-                          <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>{tx.transaction_date}</span>
-                          {tx.category && <span style={{ fontSize: 11, color: "#94a3b8" }}>{tx.category}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {displayTxs.length === 0 && (
-                    <div style={{ textAlign: "center", padding: "30px 0", color: "#94a3b8", fontSize: 14 }}>
-                      {transactions.length === 0 ? "No transactions yet." : "No transactions match these filters."}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {/* IMPORT */}
-            {activeTab === "import" && (() => {
-              const isPro = subscription?.status === "pro";
-              const existingImported = transactions.filter(t => t.source === "import").length;
-              const FREE_LIMIT = 50;
-              const PRO_WARN_LIMIT = 300;
-
-              // Count pro user's imports this calendar month
-              const thisMonthImported = (() => {
-                if (!isPro) return 0;
-                const start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
-                return transactions.filter(t => t.source === "import" && new Date(t.created_at) >= start).length;
-              })();
-
-              const activeImportRows = importRows.filter(r => !r._deleted);
-              const wouldExceedFree = !isPro && (existingImported + activeImportRows.length) > FREE_LIMIT;
-              const proMonthWarning = isPro && thisMonthImported + activeImportRows.length > PRO_WARN_LIMIT;
-
-              async function handleParseFile(file) {
-                setImportError(null);
-                setImportParsing(true);
-                setImportStep("upload");
-                setImportFileName(file.name);
-                try {
-                  let text = "";
-                  if (file.name.match(/\.xlsx?$/i)) {
-                    const buf = await file.arrayBuffer();
-                    const wb = XLSX.read(buf, { type: "array" });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    text = XLSX.utils.sheet_to_csv(ws);
-                  } else {
-                    text = await file.text();
-                  }
-                  await runParse(text);
-                } catch (e) {
-                  setImportError("Could not read file: " + e.message);
-                  setImportParsing(false);
-                }
-              }
-
-              async function runParse(text) {
-                setImportParsing(true);
-                setImportError(null);
-                try {
-                  const res = await fetch("/api/parse-import", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text }),
-                  });
-                  const data = await res.json();
-                  if (!res.ok || data.error) { setImportError(data.error || "Parsing failed."); setImportParsing(false); return; }
-                  if (data.warning) setImportError(data.warning); // non-fatal: show as yellow-ish notice
-
-                  let rows = data.transactions.map((t, i) => ({
-                    ...t,
-                    _id: i,
-                    _transfer: t.type === "transfer",
-                    _deleted: t.type === "transfer", // transfers unchecked by default
-                    property_id: "",
-                    isDuplicate: transactions.some(ex =>
-                      ex.transaction_date === t.transaction_date &&
-                      Math.abs(Number(ex.amount)) === Math.abs(t.amount) &&
-                      (ex.description || "").toLowerCase() === (t.description || "").toLowerCase()
-                    ),
-                  }));
-
-                  // Smart recurring detection: cross-reference with existing transactions
-                  // If the same description appears in 2+ calendar months (existing + imported)
-                  // with a consistent day-of-month (±5 days), flag it recurring.
-                  const descMap = {};
-                  [...transactions, ...rows].forEach(t => {
-                    const key = (t.description || "").toLowerCase().trim();
-                    if (!descMap[key]) descMap[key] = [];
-                    descMap[key].push(t);
-                  });
-                  rows = rows.map(r => {
-                    if (r._transfer || r.recurring) return r; // already classified
-                    const key = (r.description || "").toLowerCase().trim();
-                    const group = descMap[key] || [];
-                    if (group.length < 2) return r;
-                    const months = new Set(group.map(t => (t.transaction_date || "").slice(0, 7)).filter(Boolean));
-                    if (months.size < 2) return r;
-                    const days = group.map(t => {
-                      const d = new Date((t.transaction_date || "") + "T12:00:00");
-                      return isNaN(d) ? -1 : d.getDate();
-                    }).filter(d => d >= 1);
-                    const avgDay = Math.round(days.reduce((a, b) => a + b, 0) / days.length);
-                    if (days.every(d => Math.abs(d - avgDay) <= 5)) {
-                      return { ...r, recurring: true, guessedFrequency: "monthly" };
-                    }
-                    return r;
-                  });
-
-                  setImportRows(rows);
-                  setImportStep("preview");
-                } catch (e) {
-                  setImportError("Network error. Please try again.");
-                } finally {
-                  setImportParsing(false);
-                }
-              }
-
-              async function handleConfirmImport() {
-                if (wouldExceedFree) return;
-                const batchId = crypto.randomUUID();
-                const toInsert = importRows
-                  .filter(r => !r._deleted)
-                  .map(r => ({
-                    business_id: business.id,
-                    property_id: r.property_id || null,
-                    transaction_date: r.transaction_date,
-                    description: r.description,
-                    category: r.category,
-                    amount: (r.type === "expense" || (r.type === "transfer" && r.amount < 0)) ? -Math.abs(r.amount) : Math.abs(r.amount),
-                    type: r.type === "transfer" ? (r.amount > 0 ? "income" : "expense") : r.type,
-                    source: "import",
-                    batch_id: batchId,
-                  }));
-                if (toInsert.length === 0) return;
-
-                const { data: inserted, error } = await supabase.from("transactions").insert(toInsert).select();
-                if (error) { setImportError("Import failed: " + error.message); return; }
-
-                // Snapshot pre-import transactions for duplicate detection (state update is async)
-                const prevTransactions = transactions;
-                setTransactions(prev => [...prev, ...inserted]);
-
-                // ── Recurring templates ──────────────────────────────────────
-                const activeRows = importRows.filter(r => !r._deleted);
-                const recurringRows = activeRows.filter(r => r.recurring);
-                if (recurringRows.length > 0) {
-                  const seen = new Set();
-                  const recurringTemplates = recurringRows
-                    .filter(r => {
-                      const key = (r.description || "").toLowerCase().trim() + "|" + (r.guessedFrequency || "monthly");
-                      if (seen.has(key)) return false;
-                      seen.add(key); return true;
-                    })
-                    .map(r => {
-                      const resolvedType = r.type === "transfer" ? (r.amount > 0 ? "income" : "expense") : r.type;
-                      const resolvedAmt = resolvedType === "expense" ? -Math.abs(r.amount) : Math.abs(r.amount);
-                      const freq = r.guessedFrequency || "monthly";
-                      const base = new Date(r.transaction_date + "T12:00:00");
-                      const dom = base.getDate();
-                      const next = new Date(base);
-                      if (freq === "monthly") next.setMonth(next.getMonth() + 1);
-                      else if (freq === "weekly") next.setDate(next.getDate() + 7);
-                      else next.setFullYear(next.getFullYear() + 1);
-                      const today = new Date();
-                      if (freq === "monthly") { while (next <= today) next.setMonth(next.getMonth() + 1); }
-                      else if (freq === "weekly") { while (next <= today) next.setDate(next.getDate() + 7); }
-                      else { while (next <= today) next.setFullYear(next.getFullYear() + 1); }
-                      return {
-                        business_id: business.id,
-                        property_id: r.property_id || null,
-                        description: r.description,
-                        amount: resolvedAmt,
-                        type: resolvedType,
-                        category: r.category || null,
-                        frequency: freq,
-                        day_of_month: dom,
-                        next_due_date: next.toISOString().slice(0, 10),
-                        active: true,
-                        batch_id: batchId,
-                      };
-                    });
-
-                  // Try insert with batch_id; if that column is missing, retry without it
-                  let { error: rErr } = await supabase.from("recurring_transactions").insert(recurringTemplates);
-                  if (rErr && rErr.message && rErr.message.includes("batch_id")) {
-                    const withoutBatch = recurringTemplates.map(({ batch_id, ...rest }) => rest);
-                    const { error: rErr2 } = await supabase.from("recurring_transactions").insert(withoutBatch);
-                    if (rErr2) console.error("Recurring insert failed:", rErr2.message);
-                  } else if (rErr) {
-                    console.error("Recurring insert failed:", rErr.message);
-                  }
-
-                  // Always refresh recurring state regardless of batch_id errors
-                  const { data: freshRecur } = await supabase.from("recurring_transactions")
-                    .select("*").eq("business_id", business.id).eq("active", true).order("next_due_date");
-                  if (freshRecur) setRecurring(freshRecur);
-                }
-
-                setImportDoneCount(inserted.length);
-
-                // ── Post-import duplicate detection ──────────────────────────
-                const dupes = [];
-                (inserted || []).forEach(newTx => {
-                  prevTransactions.forEach(ex => {
-                    const sameDate = ex.transaction_date === newTx.transaction_date;
-                    const sameDesc = (ex.description || "").toLowerCase().trim() === (newTx.description || "").toLowerCase().trim();
-                    const sameCat  = (ex.category || "") === (newTx.category || "");
-                    const amtClose = Math.abs(Math.abs(ex.amount) - Math.abs(newTx.amount)) <= 5;
-                    const daysDiff = Math.abs(
-                      new Date(ex.transaction_date + "T12:00:00") - new Date(newTx.transaction_date + "T12:00:00")
-                    ) / (1000 * 60 * 60 * 24);
-                    const isDupe = (sameDate && amtClose) || (sameDate && sameDesc) || (sameDesc && sameCat && daysDiff <= 3);
-                    if (isDupe && !dupes.some(d => d.existing.id === ex.id && d.imported.id === newTx.id)) {
-                      dupes.push({ existing: ex, imported: newTx });
-                    }
-                  });
-                });
-
-                if (dupes.length > 0) {
-                  setImportDuplicates(dupes);
-                  setImportStep("duplicates");
-                } else {
-                  setImportStep("done");
-                }
-              }
-
-              function resetImport() {
-                setImportStep("upload");
-                setImportRows([]);
-                setImportError(null);
-                setImportDoneCount(0);
-                setImportParsing(false);
-                setImportPasteText("");
-                setImportDragging(false);
-                setImportFileName("");
-                setImportDuplicates([]);
-              }
-
-              function updateRow(id, field, value) {
-                setImportRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
-              }
-
-              function includeTransfer(id) {
-                setImportRows(prev => prev.map(r => r._id === id
-                  ? { ...r, _deleted: false, type: r.amount >= 0 ? "income" : "expense" }
-                  : r));
-              }
-
-              function excludeTransfer(id) {
-                setImportRows(prev => prev.map(r => r._id === id ? { ...r, _deleted: true } : r));
-              }
-
-              // ── Step: duplicates ─────────────────────────────────────────
-              if (importStep === "duplicates") return (
-                <div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>REVIEW POSSIBLE DUPLICATES</div>
-                  <div style={{ background: "#1c1200", border: "1px solid #d97706", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#d97706", lineHeight: 1.6 }}>
-                    ⚠️ {importDuplicates.length} possible duplicate{importDuplicates.length !== 1 ? "s" : ""} found — same date + similar amount, same date + same payee, or same payee + category within 3 days of an existing record. Choose what to keep for each one.
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-                    {importDuplicates.map(({ existing, imported }, idx) => (
-                      <div key={idx} style={{ background: "#0f1117", border: "1px solid #d97706", borderRadius: 12, padding: 14 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                          <div style={{ background: "#080b12", border: "1px solid #1e2235", borderRadius: 8, padding: 10 }}>
-                            <div style={{ fontSize: 10, color: "#4b5563", marginBottom: 6, fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>EXISTING</div>
-                            <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginBottom: 4, wordBreak: "break-word" }}>{existing.description}</div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: existing.amount >= 0 ? "#4ade80" : "#f87171" }}>{fmt(existing.amount)}</div>
-                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{existing.transaction_date}</div>
-                          </div>
-                          <div style={{ background: "#080b12", border: "1px solid #1e3a5f", borderRadius: 8, padding: 10 }}>
-                            <div style={{ fontSize: 10, color: "#1d4ed8", marginBottom: 6, fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>JUST IMPORTED</div>
-                            <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginBottom: 4, wordBreak: "break-word" }}>{imported.description}</div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: imported.amount >= 0 ? "#4ade80" : "#f87171" }}>{fmt(imported.amount)}</div>
-                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{imported.transaction_date}</div>
-                          </div>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                          <button onClick={() => setImportDuplicates(prev => prev.filter((_, i) => i !== idx))}
-                            style={{ background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 8, padding: "9px 0", color: "#4ade80", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                            Keep Both
-                          </button>
-                          <button onClick={async () => {
-                            await supabase.from("transactions").delete().eq("id", imported.id);
-                            setTransactions(prev => prev.filter(t => t.id !== imported.id));
-                            setImportDuplicates(prev => prev.filter((_, i) => i !== idx));
-                          }} style={{ background: "#1a1535", border: "1px solid #7c3aed", borderRadius: 8, padding: "9px 0", color: "#c4b5fd", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                            Delete Import
-                          </button>
-                          <button onClick={async () => {
-                            await supabase.from("transactions").delete().eq("id", existing.id);
-                            setTransactions(prev => prev.filter(t => t.id !== existing.id));
-                            setImportDuplicates(prev => prev.filter((_, i) => i !== idx));
-                          }} style={{ background: "#2d1515", border: "1px solid #7f1d1d", borderRadius: 8, padding: "9px 0", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                            Delete Original
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <button onClick={() => { setImportDuplicates([]); setImportStep("done"); }}
-                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1e2235", color: "#94a3b8", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
-                    Skip All & Continue →
-                  </button>
-                </div>
-              );
-
-              // ── Step: done ───────────────────────────────────────────────
-              if (importStep === "done") return (
-                <div style={{ textAlign: "center", padding: "48px 16px" }}>
-                  <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80", marginBottom: 8 }}>
-                    {importDoneCount} transaction{importDoneCount !== 1 ? "s" : ""} imported
-                  </div>
-                  <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 32 }}>They're now in your Transactions tab.</div>
-                  <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-                    <button onClick={() => { resetImport(); setFilterProp("all"); setActiveTab("transactions"); }}
-                      style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "12px 24px", color: "#fff", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
-                      View Transactions
-                    </button>
-                    <button onClick={resetImport}
-                      style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 10, padding: "12px 24px", color: "#94a3b8", cursor: "pointer", fontSize: 15 }}>
-                      Import More
-                    </button>
-                  </div>
-                </div>
-              );
-
-              // ── Step: preview ────────────────────────────────────────────
-              if (importStep === "preview") return (
-                <>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>IMPORT — REVIEW TRANSACTIONS</div>
-
-                  {/* Free limit error */}
-                  {wouldExceedFree && (
-                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#f87171", marginBottom: 6 }}>Import limit reached</div>
-                      <div style={{ fontSize: 13, color: "#fca5a5" }}>
-                        This import is too large for your free trial. You've used {existingImported} of {FREE_LIMIT} total imported transactions.
-                        This file would add {activeImportRows.length} more. Try a smaller file or{" "}
-                        <span onClick={() => setActiveTab("billing")} style={{ color: "#3b82f6", cursor: "pointer", textDecoration: "underline" }}>subscribe for full access</span>.
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Pro monthly warning */}
-                  {proMonthWarning && (
-                    <div style={{ background: "#1a1a2e", border: "1px solid #a78bfa", borderRadius: 12, padding: 14, marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, color: "#c4b5fd" }}>
-                        ⚠️ Large import ({activeImportRows.length} transactions). For best results, consider splitting into smaller date ranges.
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ fontSize: 14, color: "#e2e8f0" }}>
-                      <span style={{ fontWeight: 700, color: "#4ade80" }}>{activeImportRows.length}</span> transactions parsed
-                      {!isPro && <span style={{ color: "#94a3b8", fontSize: 12 }}> · {existingImported} of {FREE_LIMIT} free slots used</span>}
-                    </div>
-                    <button onClick={resetImport}
-                      style={{ background: "transparent", border: "1px solid #2d3555", borderRadius: 8, padding: "7px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>
-                      ← Start Over
-                    </button>
-                  </div>
-
-                  {importError && (
-                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 10, padding: 12, marginBottom: 14, color: "#f87171", fontSize: 13 }}>{importError}</div>
-                  )}
-
-                  {/* ── Transfer warning section ──────────────────────────── */}
-                  {importRows.some(r => r._transfer) && (() => {
-                    const transferRows = importRows.filter(r => r._transfer);
-                    const includedCount = transferRows.filter(r => !r._deleted).length;
-                    return (
-                      <div style={{ background: "#1c1200", border: "1px solid #d97706", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24", marginBottom: 6 }}>
-                          ⚠️ {transferRows.length} Possible Transfer{transferRows.length !== 1 ? "s" : ""} Detected
-                        </div>
-                        <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.6, marginBottom: 14 }}>
-                          These look like transfers between accounts — not income or expenses. Importing them would inflate your totals. They're excluded by default. Check any that represent real income or spending.
-                          {includedCount > 0 && <span style={{ color: "#d97706" }}> ({includedCount} included — will be saved as income or expense based on amount.)</span>}
-                        </div>
-                        {transferRows.map(row => (
-                          <div key={row._id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid #2a1d00" }}>
-                            <input type="checkbox" checked={!row._deleted}
-                              onChange={e => e.target.checked ? includeTransfer(row._id) : excludeTransfer(row._id)}
-                              style={{ width: 18, height: 18, flexShrink: 0, cursor: "pointer", accentColor: "#d97706" }} />
-                            <div style={{ flex: 1, opacity: row._deleted ? 0.4 : 1 }}>
-                              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{row.description}</div>
-                              <div style={{ fontSize: 11, color: "#92400e" }}>
-                                {row.transaction_date} · <span style={{ color: row.amount >= 0 ? "#4ade80" : "#f87171" }}>{row.amount >= 0 ? "+" : ""}{fmt(row.amount)}</span>
-                              </div>
-                            </div>
-                            {!row._deleted && (
-                              <select value={row.type === "transfer" ? (row.amount >= 0 ? "income" : "expense") : row.type}
-                                onChange={e => updateRow(row._id, "type", e.target.value)}
-                                style={{ ...inputStyle, fontSize: 12, padding: "6px 8px", width: "auto" }}>
-                                <option value="income">Income</option>
-                                <option value="expense">Expense</option>
-                              </select>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-                    {importRows.filter(r => !r._deleted && !r._transfer).map(row => (
-                      <div key={row._id} style={{ background: "#0f1117", border: `1px solid ${row.isDuplicate ? "#854d0e" : "#1e2235"}`, borderRadius: 12, padding: 14 }}>
-                        {row.isDuplicate && (
-                          <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>⚠ POSSIBLE DUPLICATE</div>
-                        )}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, padding: "8px 10px", borderRadius: 8, background: row.recurring ? "#1a1535" : "#0f1117", border: `1px solid ${row.recurring ? "#7c3aed" : "#1e2235"}` }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}>
-                            <input type="checkbox" checked={!!row.recurring}
-                              onChange={e => updateRow(row._id, "recurring", e.target.checked)}
-                              style={{ accentColor: "#a78bfa", cursor: "pointer", width: 17, height: 17, flexShrink: 0 }} />
-                            <span style={{ fontSize: 13, fontWeight: row.recurring ? 600 : 400, color: row.recurring ? "#c4b5fd" : "#64748b" }}>
-                              ↻ Recurring{row.recurring ? " — will add to schedule" : ""}
-                            </span>
-                          </label>
-                          {row.recurring && (
-                            <select value={row.guessedFrequency || "monthly"}
-                              onChange={e => updateRow(row._id, "guessedFrequency", e.target.value)}
-                              style={{ ...inputStyle, fontSize: 12, padding: "4px 8px", width: "auto", flexShrink: 0 }}>
-                              <option value="monthly">Monthly</option>
-                              <option value="weekly">Weekly</option>
-                              <option value="yearly">Yearly</option>
-                            </select>
-                          )}
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                          <input type="date" value={row.transaction_date}
-                            onChange={e => updateRow(row._id, "transaction_date", e.target.value)}
-                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }} />
-                          <select value={row.type} onChange={e => updateRow(row._id, "type", e.target.value)}
-                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
-                            <option value="income">Income</option>
-                            <option value="expense">Expense</option>
-                          </select>
-                        </div>
-                        <input value={row.description} onChange={e => updateRow(row._id, "description", e.target.value)}
-                          placeholder="Description" style={{ ...inputStyle, fontSize: 13, padding: "8px 10px", marginBottom: 8 }} />
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                          <input type="number" value={Math.abs(row.amount)}
-                            onChange={e => updateRow(row._id, "amount", Number(e.target.value))}
-                            placeholder="Amount" style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }} />
-                          <select value={row.category} onChange={e => updateRow(row._id, "category", e.target.value)}
-                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
-                            <option value="Income / Rent">Income / Rent</option>
-                            {["Loan Payment","Materials","Repairs","Insurance","Utilities","Labor","Equipment","Platform Fees","Other"].map(c =>
-                              <option key={c} value={c}>{c}</option>
-                            )}
-                          </select>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
-                          <select value={row.property_id} onChange={e => updateRow(row._id, "property_id", e.target.value)}
-                            style={{ ...inputStyle, fontSize: 13, padding: "8px 10px" }}>
-                            <option value="">Shared / All Properties</option>
-                            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                          <button onClick={() => updateRow(row._id, "_deleted", true)}
-                            style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 18, padding: "0 6px" }} title="Remove row">✕</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button onClick={handleConfirmImport} disabled={wouldExceedFree || activeImportRows.length === 0}
-                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
-                      background: wouldExceedFree || activeImportRows.length === 0 ? "#1e2235" : "#1d4ed8",
-                      color: wouldExceedFree || activeImportRows.length === 0 ? "#4b5563" : "#fff",
-                      fontSize: 16, fontWeight: 700, cursor: wouldExceedFree || activeImportRows.length === 0 ? "not-allowed" : "pointer" }}>
-                    Import {activeImportRows.length} Transaction{activeImportRows.length !== 1 ? "s" : ""}
-                  </button>
-                </>
-              );
-
-              // ── Step: upload ─────────────────────────────────────────────
-              return (
-                <>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 16 }}>IMPORT TRANSACTIONS</div>
-
-                  {!isPro && (
-                    <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#94a3b8" }}>
-                      Free trial: <span style={{ color: existingImported >= FREE_LIMIT ? "#f87171" : "#4ade80", fontWeight: 600 }}>{existingImported}</span> of {FREE_LIMIT} imported transactions used.
-                      {existingImported >= FREE_LIMIT && <> <span onClick={() => setActiveTab("billing")} style={{ color: "#3b82f6", cursor: "pointer" }}>Upgrade for unlimited →</span></>}
-                    </div>
-                  )}
-
-                  {/* Drop zone */}
-                  <div
-                    ref={importDropRef}
-                    onDragOver={e => { e.preventDefault(); setImportDragging(true); }}
-                    onDragLeave={() => setImportDragging(false)}
-                    onDrop={e => { e.preventDefault(); setImportDragging(false); const f = e.dataTransfer.files[0]; if (f) handleParseFile(f); }}
-                    onClick={() => document.getElementById("importFileInput").click()}
-                    style={{ border: `2px dashed ${importDragging ? "#3b82f6" : "#2d3555"}`, borderRadius: 14, padding: "32px 16px", textAlign: "center", cursor: "pointer", marginBottom: 16, background: importDragging ? "#0d1b3e" : "#0f1117", transition: "border-color 0.15s, background 0.15s" }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
-                    <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 4 }}>Drag & drop a file, or click to browse</div>
-                    <div style={{ fontSize: 12, color: "#64748b" }}>CSV · XLSX · XLS</div>
-                    <input id="importFileInput" type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
-                      onChange={e => { const f = e.target.files[0]; if (f) handleParseFile(f); e.target.value = ""; }} />
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                    <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
-                    <div style={{ fontSize: 12, color: "#4b5563", fontFamily: "'Courier New', monospace" }}>OR PASTE TEXT</div>
-                    <div style={{ flex: 1, height: 1, background: "#1e2235" }} />
-                  </div>
-
-                  <textarea value={importPasteText} onChange={e => setImportPasteText(e.target.value)}
-                    placeholder={"Paste CSV data, bank export, or any tab/comma separated text here…"}
-                    rows={6} style={{ ...inputStyle, resize: "vertical", fontSize: 13, fontFamily: "'Courier New', monospace", marginBottom: 12 }} />
-
-                  {importError && (
-                    <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 10, padding: 12, marginBottom: 12, color: "#f87171", fontSize: 13 }}>{importError}</div>
-                  )}
-
-                  <button
-                    onClick={() => { if (importPasteText.trim()) runParse(importPasteText); }}
-                    disabled={importParsing || !importPasteText.trim()}
-                    style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none",
-                      background: importParsing || !importPasteText.trim() ? "#1e2235" : "#1d4ed8",
-                      color: importParsing || !importPasteText.trim() ? "#4b5563" : "#fff",
-                      fontSize: 16, fontWeight: 700, cursor: importParsing || !importPasteText.trim() ? "not-allowed" : "pointer",
-                      marginBottom: 20 }}>
-                    {importParsing ? "Parsing with AI…" : "Parse with AI →"}
-                  </button>
-
-                  {/* Disclaimer */}
-                  <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
-                    <div style={{ fontWeight: 600, color: "#94a3b8", marginBottom: 4 }}>About imports</div>
-                    CSV and Excel files are sent to Claude AI for parsing. Your data is used only to extract transaction records and is not stored by Anthropic beyond the request.
-                    Review all transactions carefully before confirming — AI parsing may occasionally misread amounts, dates, or categories.
-                    Large files (&gt;1,000 rows) may take 10–30 seconds to parse.
-                    {!isPro && <> Free trial accounts are limited to {FREE_LIMIT} total imported transactions.</>}
-                  </div>
-                </>
-              );
-            })()}
-
-            {/* MONTHLY P&L */}
-            {activeTab === "monthly" && (() => {
-              const pnlYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
-              const nowYear = String(new Date().getFullYear());
-              if (!pnlYears.includes(nowYear)) pnlYears.unshift(nowYear);
-              const pnlTxs = transactions.filter(t => {
-                if (!t.transaction_date) return false;
-                if (pnlYear !== "all" && t.transaction_date.slice(0,4) !== pnlYear) return false;
-                if (pnlQuarter !== "all") {
-                  const m = parseInt(t.transaction_date.slice(5,7));
-                  if (Math.ceil(m / 3) !== parseInt(pnlQuarter)) return false;
-                }
-                return true;
-              });
-              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
-              return (
-                <>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>MONTHLY P&L — ACTUAL VS PROJECTED</div>
-
-                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                    <select value={pnlYear} onChange={e => setPnlYear(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Years</option>
-                      {pnlYears.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                    <select value={pnlQuarter} onChange={e => setPnlQuarter(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Quarters</option>
-                      <option value="1">Q1 — Jan–Mar</option>
-                      <option value="2">Q2 — Apr–Jun</option>
-                      <option value="3">Q3 — Jul–Sep</option>
-                      <option value="4">Q4 — Oct–Dec</option>
-                    </select>
-                  </div>
-
-                  {(() => {
-                    const monthMap = {};
-                    pnlTxs.forEach(t => {
-                      const month = t.transaction_date?.slice(0, 7);
-                      if (!month) return;
-                      if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
-                      if (t.amount > 0) monthMap[month].income += t.amount;
-                      else monthMap[month].expenses += Math.abs(t.amount);
-                    });
-                    const months = Object.keys(monthMap).sort();
-                    const maxVal = Math.max(...months.map(m => Math.max(monthMap[m].income, monthMap[m].expenses)), 1);
-                    return months.length > 0 ? (
-                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
-                        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>ACTUAL — BY MONTH</div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100, overflowX: "auto" }}>
-                          {months.map((m, i) => {
-                            const { income, expenses } = monthMap[m];
-                            const net = income - expenses;
-                            return (
-                              <div key={i} style={{ flex: "0 0 auto", minWidth: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                                <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
-                                  <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(income / maxVal) * 70}px`, minHeight: income > 0 ? 2 : 0 }} />
-                                  <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(expenses / maxVal) * 70}px`, minHeight: expenses > 0 ? 2 : 0 }} />
-                                </div>
-                                <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace" }}>{m.slice(5)}</div>
-                                <div style={{ fontSize: 9, color: net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(net)}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#4ade80", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Income</span></div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 10, height: 10, background: "#f87171", borderRadius: 2 }} /><span style={{ fontSize: 11, color: "#94a3b8" }}>Expenses</span></div>
-                        </div>
-                      </div>
-                    ) : <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>No transaction data for this period.</div>;
-                  })()}
-
-                  {(() => {
-                    const now = new Date();
-                    const months = [];
-                    for (let i = 0; i < 6; i++) {
-                      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-                      const label = d.toLocaleString("default", { month: "short" }) + " " + d.getFullYear();
-                      let income = 0, expenses = 0;
-                      recurring.forEach(r => {
-                        if (r.frequency === "monthly") {
-                          if (r.amount > 0) income += r.amount;
-                          else expenses += Math.abs(r.amount);
-                        }
-                      });
-                      months.push({ label, income, expenses, net: income - expenses });
-                    }
-                    const maxVal = Math.max(...months.map(m => Math.max(m.income, m.expenses)), 1);
-                    return recurring.length > 0 ? (
-                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px", marginBottom: 20 }}>
-                        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 14 }}>6-MONTH PROJECTION (RECURRING)</div>
-                        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 100 }}>
-                          {months.map((m, i) => (
-                            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                              <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 70 }}>
-                                <div style={{ flex: 1, background: "#4ade80", borderRadius: "3px 3px 0 0", height: `${(m.income / maxVal) * 70}px`, minHeight: m.income > 0 ? 2 : 0 }} />
-                                <div style={{ flex: 1, background: "#f87171", borderRadius: "3px 3px 0 0", height: `${(m.expenses / maxVal) * 70}px`, minHeight: m.expenses > 0 ? 2 : 0 }} />
-                              </div>
-                              <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'Courier New', monospace", textAlign: "center" }}>{m.label}</div>
-                              <div style={{ fontSize: 9, color: m.net >= 0 ? "#4ade80" : "#f87171", fontFamily: "'Courier New', monospace" }}>{fmt(m.net)}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>MONTH BY MONTH</div>
-                  {(() => {
-                    const monthMap = {};
-                    pnlTxs.forEach(t => {
-                      const month = t.transaction_date?.slice(0, 7);
-                      if (!month) return;
-                      if (!monthMap[month]) monthMap[month] = { income: 0, expenses: 0 };
-                      if (t.amount > 0) monthMap[month].income += t.amount;
-                      else monthMap[month].expenses += Math.abs(t.amount);
-                    });
-                    return Object.keys(monthMap).sort().reverse().map(month => {
-                      const { income, expenses } = monthMap[month];
-                      const net = income - expenses;
-                      return (
-                        <div key={month} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                            <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600 }}>{new Date(month + "-02").toLocaleString("default", { month: "long", year: "numeric" })}</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: net >= 0 ? "#4ade80" : "#f87171" }}>{fmt(net)}</div>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Income</div><div style={{ fontSize: 14, color: "#4ade80" }}>{fmt(income)}</div></div>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 14, color: "#f87171" }}>{fmt(expenses)}</div></div>
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
-                </>
-              );
-            })()}
-
-            {/* RECURRING */}
-            {activeTab === "recurring" && (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>RECURRING TRANSACTIONS</div>
-                  <button onClick={() => { setEditingRecurring(null); setRecurringForm({ property_id: properties[0]?.id || "", description: "", amount: "", type: "income", category: "", frequency: "monthly", day_of_month: 1, next_due_date: "", end_date: "" }); setShowRecurringForm(true); }}
-                    style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "10px 16px", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-                    + Add Recurring
-                  </button>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                  <select value={recurFilterProp} onChange={e => setRecurFilterProp(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 120, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="all">All Properties</option>
-                    {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <select value={recurFilterType} onChange={e => setRecurFilterType(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 110, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="all">All Types</option>
-                    <option value="income">Income</option>
-                    <option value="expense">Expense</option>
-                  </select>
-                  <select value={recurFilterFreq} onChange={e => setRecurFilterFreq(e.target.value)}
-                    style={{ ...inputStyle, flex: "1 1 auto", minWidth: 110, fontSize: 13, padding: "8px 10px" }}>
-                    <option value="all">All Frequencies</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </div>
-
-                {showRecurringForm && (
-                  <form onSubmit={async (e) => {
-                    e.preventDefault();
-                    const payload = {
-                      business_id: business.id,
-                      property_id: recurringForm.property_id === "all" ? null : recurringForm.property_id,
-                      description: recurringForm.description,
-                      amount: parseFloat(recurringForm.amount) * (recurringForm.type === "expense" ? -1 : 1),
-                      type: recurringForm.type,
-                      category: recurringForm.category || null,
-                      frequency: recurringForm.frequency,
-                      day_of_month: parseInt(recurringForm.day_of_month),
-                      next_due_date: recurringForm.next_due_date,
-                      end_date: recurringForm.end_date || null,
-                      active: true,
-                    };
-                    if (editingRecurring) {
-                      const { data, error } = await supabase.from("recurring_transactions").update(payload).eq("id", editingRecurring.id).select().single();
-                      if (!error) setRecurring(prev => prev.map(r => r.id === editingRecurring.id ? data : r));
-                    } else {
-                      const { data, error } = await supabase.from("recurring_transactions").insert([payload]).select().single();
-                      if (!error) setRecurring(prev => [...prev, data]);
-                    }
-                    setShowRecurringForm(false);
-                    runBackfill();
-                  }} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={recurringForm.property_id} onChange={e => setRecurringForm(v => ({ ...v, property_id: e.target.value }))} style={inputStyle}>
-                      <option value="all">All Properties (shared expense)</option>
-                      {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <input placeholder="Description" value={recurringForm.description} onChange={e => setRecurringForm(v => ({ ...v, description: e.target.value }))} required style={inputStyle} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <select value={recurringForm.type} onChange={e => setRecurringForm(v => ({ ...v, type: e.target.value }))} style={inputStyle}>
-                        <option value="income">Income</option>
-                        <option value="expense">Expense</option>
-                      </select>
-                      <input type="number" placeholder="Amount" value={recurringForm.amount} onChange={e => setRecurringForm(v => ({ ...v, amount: e.target.value }))} required style={inputStyle} />
-                    </div>
-                    <select value={recurringForm.category} onChange={e => setRecurringForm(v => ({ ...v, category: e.target.value }))} style={inputStyle}>
-                      <option value="">Income / Rent</option>
-                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <select value={recurringForm.frequency} onChange={e => setRecurringForm(v => ({ ...v, frequency: e.target.value }))} style={inputStyle}>
-                        <option value="monthly">Monthly</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="yearly">Yearly</option>
-                      </select>
-                      <input type="number" placeholder="Day of month" min="1" max="31" value={recurringForm.day_of_month} onChange={e => setRecurringForm(v => ({ ...v, day_of_month: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <div>
-                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>Start date:</div>
-                        <input type="date" value={recurringForm.next_due_date} onChange={e => setRecurringForm(v => ({ ...v, next_due_date: e.target.value }))} required style={inputStyle} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>End date (optional):</div>
-                        <input type="date" value={recurringForm.end_date || ""} onChange={e => setRecurringForm(v => ({ ...v, end_date: e.target.value }))} style={inputStyle} />
-                      </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <button type="submit" style={{ background: "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", cursor: "pointer", fontSize: 15, padding: "12px 0", fontWeight: 600 }}>Save</button>
-                      <button type="button" onClick={() => setShowRecurringForm(false)} style={{ background: "#1e2235", border: "none", borderRadius: 10, color: "#94a3b8", cursor: "pointer", fontSize: 15, padding: "12px 0" }}>Cancel</button>
-                    </div>
-                  </form>
-                )}
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {displayRecurring.length === 0 && (
-                    <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0" }}>
-                      {recurring.length === 0 ? "No recurring transactions set up yet." : "No recurring transactions match these filters."}
-                    </div>
-                  )}
-                  {displayRecurring.map(r => (
-                    <div key={r.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "14px 16px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                        <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, flex: 1, marginRight: 12 }}>{r.description}</div>
-                        <div style={{ fontSize: 17, fontWeight: 700, color: r.amount >= 0 ? "#4ade80" : "#f87171", whiteSpace: "nowrap" }}>{fmt(r.amount)}</div>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>{r.property_id ? properties.find(p => p.id === r.property_id)?.name : "All Properties"}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10, fontFamily: "'Courier New', monospace" }}>
-                        {r.frequency} · next: {r.next_due_date}{r.end_date ? ` · ends: ${r.end_date}` : ""}
-                      </div>
-                      {r.batch_id && (() => {
-                        const batch = importBatches.find(b => b.id === r.batch_id);
-                        return (
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "6px 10px", background: "#1c1200", border: "1px solid #3d2e00", borderRadius: 8 }}>
-                            <span style={{ fontSize: 11, color: "#92400e" }}>
-                              📥 Imported {batch ? new Date(batch.importedAt).toLocaleDateString() : "from file"}
-                            </span>
-                            <button onClick={async () => {
-                              if (!window.confirm(`Remove all recurring schedules from this import batch?`)) return;
-                              const { error } = await supabase.from("recurring_transactions").delete().eq("batch_id", r.batch_id);
-                              if (!error) setRecurring(prev => prev.filter(x => x.batch_id !== r.batch_id));
-                            }} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: "0 4px" }}>
-                              ✕ Delete batch
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => { setEditingRecurring(r); setRecurringForm({ property_id: r.property_id || "all", description: r.description, amount: Math.abs(r.amount), type: r.type, category: r.category || "", frequency: r.frequency, day_of_month: r.day_of_month, next_due_date: r.next_due_date, end_date: r.end_date || "" }); setShowRecurringForm(true); }}
-                          style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
-                        <button onClick={async () => {
-                          if (!window.confirm("Stop this recurring transaction? It will no longer generate future entries.")) return;
-                          await supabase.from("recurring_transactions").update({ active: false }).eq("id", r.id);
-                          setRecurring(prev => prev.filter(x => x.id !== r.id));
-                        }} style={{ background: "#1e2235", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 14px", color: "#f87171", cursor: "pointer", fontSize: 12 }}>Stop</button>
-                        <button onClick={async () => {
-                          if (!window.confirm(`Delete "${r.description}" permanently? This cannot be undone.`)) return;
-                          const { error } = await supabase.from("recurring_transactions").delete().eq("id", r.id);
-                          if (!error) setRecurring(prev => prev.filter(x => x.id !== r.id));
-                        }} style={{ background: "#2d0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 10px", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>✕</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* NOTES */}
-            {activeTab === "notes" && (
-              <>
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>GENERAL NOTES</div>
-                <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 24 }}>
-                  <textarea value={generalNote.content} onChange={e => setGeneralNote(v => ({ ...v, content: e.target.value }))}
-                    placeholder="Shared business notes..."
-                    rows={6} style={{ width: "100%", boxSizing: "border-box", background: "transparent", border: "none", color: "#e2e8f0", fontSize: 15, resize: "vertical", outline: "none", lineHeight: 1.6 }} />
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8, borderTop: "1px solid #1e2235", paddingTop: 10 }}>
-                    <button disabled={generalNoteSaving} onClick={async () => {
-                      setGeneralNoteSaving(true);
-                      if (generalNote.id) {
-                        const { error } = await supabase.from("notes").update({ content: generalNote.content }).eq("id", generalNote.id);
-                        if (!error) setGeneralNote(v => ({ ...v, content: generalNote.content }));
-                      } else {
-                        const { data } = await supabase.from("notes").insert([{ business_id: business.id, content: generalNote.content }]).select().single();
-                        if (data) setGeneralNote({ id: data.id, content: data.content });
-                      }
-                      setGeneralNoteSaving(false);
-                    }} style={{ background: "#1d4ed8", border: "none", borderRadius: 8, padding: "8px 18px", color: "#fff", cursor: generalNoteSaving ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: generalNoteSaving ? 0.6 : 1 }}>
-                      {generalNoteSaving ? "Saving..." : "Save"}
-                    </button>
-                    <button onClick={() => setGeneralNote(v => ({ ...v, content: "" }))} style={{ background: "#1e2235", border: "none", borderRadius: 8, padding: "8px 18px", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>Clear</button>
-                  </div>
-                </div>
-
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>NOTES BY PROPERTY</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {properties.map(p => {
-                    const note = propertyNotes[p.id] || { id: null, content: "" };
-                    return (
-                      <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16 }}>
-                        <div style={{ fontSize: 14, color: "#e2e8f0", fontWeight: 600, marginBottom: 4 }}>{p.name}</div>
-                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{p.address}</div>
-                        <textarea value={note.content} onChange={e => setPropertyNotes(prev => ({ ...prev, [p.id]: { ...note, content: e.target.value } }))}
-                          placeholder="Add notes, tenant info, schedule..."
-                          rows={3} style={{ width: "100%", boxSizing: "border-box", background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, color: "#e2e8f0", fontSize: 14, resize: "vertical", outline: "none", padding: "10px 12px", lineHeight: 1.5 }} />
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                          <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#3b82f6", textDecoration: "none" }}>📅 Google Calendar</a>
-                          <button disabled={!!propertyNotesSaving[p.id]} onClick={async () => {
-                            setPropertyNotesSaving(prev => ({ ...prev, [p.id]: true }));
-                            if (note.id) {
-                              const { error } = await supabase.from("notes").update({ content: note.content }).eq("id", note.id);
-                              if (!error) setPropertyNotes(prev => ({ ...prev, [p.id]: { ...prev[p.id], content: note.content } }));
-                            } else {
-                              const { data } = await supabase.from("notes").insert([{ business_id: business.id, property_id: p.id, content: note.content }]).select().single();
-                              if (data) setPropertyNotes(prev => ({ ...prev, [p.id]: { id: data.id, content: data.content } }));
-                            }
-                            setPropertyNotesSaving(prev => ({ ...prev, [p.id]: false }));
-                          }} style={{ background: "#1d4ed8", border: "none", borderRadius: 8, padding: "6px 16px", color: "#fff", cursor: propertyNotesSaving[p.id] ? "default" : "pointer", fontSize: 13, fontWeight: 600, opacity: propertyNotesSaving[p.id] ? 0.6 : 1 }}>
-                            {propertyNotesSaving[p.id] ? "Saving..." : "Save"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            {/* PROPERTIES */}
-            {activeTab === "properties" && (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1 }}>MANAGE PROPERTIES</div>
-                  <button onClick={openAddProperty} style={{ background: "#1d4ed8", border: "none", borderRadius: 10, padding: "10px 16px", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>+ Add Property</button>
-                </div>
-
-                {showPropEditor && (
-                  <form onSubmit={saveProperty} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 4 }}>{editingProp ? "Edit Property" : "Add New Property"}</div>
-                    <input placeholder="Property name or address" value={propForm.name} onChange={e => setPropForm(v => ({ ...v, name: e.target.value }))} required style={inputStyle} />
-                    <input placeholder="City, State" value={propForm.address} onChange={e => setPropForm(v => ({ ...v, address: e.target.value }))} style={inputStyle} />
-                    <select value={propForm.property_type} onChange={e => setPropForm(v => ({ ...v, property_type: e.target.value }))} style={inputStyle}>
-                      {PROPERTY_TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                    <input placeholder="Note (optional)" value={propForm.note} onChange={e => setPropForm(v => ({ ...v, note: e.target.value }))} style={inputStyle} />
-                    {editingProp && (
-                      <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#f87171", fontSize: 14, cursor: "pointer" }}>
-                        <input type="checkbox" checked={propForm.archived} onChange={e => setPropForm(v => ({ ...v, archived: e.target.checked }))} />
-                        Archive this property (hide from app)
-                      </label>
-                    )}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <button type="submit" style={{ background: "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", cursor: "pointer", fontSize: 15, padding: "12px 0", fontWeight: 600 }}>Save</button>
-                      <button type="button" onClick={() => setShowPropEditor(false)} style={{ background: "#1e2235", border: "none", borderRadius: 10, color: "#94a3b8", cursor: "pointer", fontSize: 15, padding: "12px 0" }}>Cancel</button>
-                    </div>
-                  </form>
-                )}
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {propStats.map(p => {
-                    const tc = typeColor(p.property_type);
-                    return (
-                      <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: "16px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 600, marginBottom: 2 }}>{p.name}</div>
-                            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
-                            <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                            <button onClick={() => openEditProperty(p)} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
-                            <button onClick={() => printProperty(p, transactions)} style={{ background: "#1a3a2a", border: "1px solid #14532d", borderRadius: 8, padding: "6px 12px", color: "#4ade80", cursor: "pointer", fontSize: 12 }}>🖨️ Print</button>
-                            <button onClick={() => {
-                              const txs = transactions.filter(t => t.property_id === p.id);
-                              const income = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-                              const expenses = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-                              const net = income - expenses;
-                              const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
-                              // Header bar
-                              doc.setFillColor(15, 17, 23);
-                              doc.rect(0, 0, 216, 28, 'F');
-                              doc.setFontSize(16);
-                              doc.setFont('helvetica', 'bold');
-                              doc.setTextColor(255, 255, 255);
-                              const landlordW = doc.getTextWidth('Landlord');
-                              doc.text('Landlord', 14, 18);
-                              doc.setTextColor(59, 130, 246);
-                              doc.text('Ledger', 14 + landlordW, 18);
-                              // Property heading
-                              doc.setTextColor(30, 30, 30);
-                              doc.setFontSize(15);
-                              doc.text(p.name, 14, 42);
-                              const meta = [p.address, p.property_type].filter(Boolean).join('  |  ');
-                              if (meta) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100); doc.text(meta, 14, 49); }
-                              doc.setDrawColor(59, 130, 246);
-                              doc.setLineWidth(0.4);
-                              doc.line(14, 54, 202, 54);
-                              // Transactions table
-                              autoTable(doc, {
-                                startY: 58,
-                                head: [['Date', 'Description', 'Category', 'Amount']],
-                                body: txs.length ? txs.map(t => [t.transaction_date, t.description || '', t.category || '—', fmt(t.amount)]) : [['—', 'No transactions', '', '']],
-                                styles: { fontSize: 9, cellPadding: 3 },
-                                headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
-                                columnStyles: { 3: { halign: 'right' } },
-                                alternateRowStyles: { fillColor: [248, 250, 252] },
-                              });
-                              // Summary box
-                              const sy = doc.lastAutoTable.finalY + 8;
-                              doc.setFillColor(239, 246, 255);
-                              doc.rect(14, sy, 188, 30, 'F');
-                              doc.setFontSize(9);
-                              doc.setFont('helvetica', 'normal');
-                              doc.setTextColor(60, 60, 60);
-                              doc.text('Total Income', 20, sy + 9);
-                              doc.setTextColor(22, 163, 74);
-                              doc.text(fmt(income), 200, sy + 9, { align: 'right' });
-                              doc.setTextColor(60, 60, 60);
-                              doc.text('Total Expenses', 20, sy + 17);
-                              doc.setTextColor(220, 38, 38);
-                              doc.text(fmt(expenses), 200, sy + 17, { align: 'right' });
-                              doc.setFont('helvetica', 'bold');
-                              doc.setTextColor(30, 30, 30);
-                              doc.text('Net P&L', 20, sy + 25);
-                              doc.setTextColor(...(net >= 0 ? [22, 163, 74] : [220, 38, 38]));
-                              doc.text(fmt(net), 200, sy + 25, { align: 'right' });
-                              doc.save(`LandlordLedger-${p.name.replace(/[^a-z0-9]/gi, '-')}.pdf`);
-                            }} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#93c5fd", cursor: "pointer", fontSize: 12 }}>📄 PDF</button>
-                            <button onClick={() => {
-                              const txs = transactions.filter(t => t.property_id === p.id);
-                              const header = "Date,Description,Category,Amount,Type\n";
-                              const rows = txs.map(t => [
-                                t.transaction_date,
-                                `"${(t.description || "").replace(/"/g, '""')}"`,
-                                `"${(t.category || "").replace(/"/g, '""')}"`,
-                                t.amount,
-                                t.amount >= 0 ? "Income" : "Expense"
-                              ].join(",")).join("\n");
-                              const blob = new Blob([header + rows], { type: "text/csv" });
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement("a");
-                              a.href = url;
-                              a.download = `LandlordLedger-${p.name.replace(/[^a-z0-9]/gi, "-")}.csv`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                              URL.revokeObjectURL(url);
-                            }} style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>📥 CSV</button>
-                          </div>
-                        </div>
-                        {p.note && <div style={{ fontSize: 12, color: "#94a3b8", borderTop: "1px solid #1e2235", paddingTop: 8, marginTop: 6 }}>{p.note}</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            {/* TAX REPORT */}
-            {activeTab === "tax report" && (() => {
-              const taxYears = [...new Set(transactions.map(t => t.transaction_date?.slice(0,4)).filter(Boolean))].sort().reverse();
-              const nowYear = String(new Date().getFullYear());
-              if (!taxYears.includes(nowYear)) taxYears.unshift(nowYear);
-
-              const taxTxs = transactions.filter(t => {
-                if (!t.transaction_date) return false;
-                if (taxYear !== "all" && t.transaction_date.slice(0,4) !== taxYear) return false;
-                if (taxQuarter !== "all") {
-                  const m = parseInt(t.transaction_date.slice(5,7));
-                  if (Math.ceil(m / 3) !== parseInt(taxQuarter)) return false;
-                }
-                return true;
-              });
-
-              const filteredTaxSummary = {};
-              taxTxs.filter(t => t.amount < 0).forEach(t => {
-                const label = TAX_CATEGORIES[t.category] || "Miscellaneous";
-                filteredTaxSummary[label] = (filteredTaxSummary[label] || 0) + Math.abs(t.amount);
-              });
-              const filteredTaxExpenses = taxTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-              const filteredTaxPropStats = properties.map(prop => {
-                const txs = taxTxs.filter(t => t.property_id === prop.id);
-                const inc = txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-                const exp = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-                return { ...prop, income: inc, expenses: exp, net: inc - exp };
-              });
-
-              const periodLabel = taxYear === "all"
-                ? "All Time"
-                : taxQuarter === "all" ? taxYear : `Q${taxQuarter} ${taxYear}`;
-              const filterSelectSm = { background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, outline: "none" };
-
-              return (
-                <>
-                  {/* Year / Quarter filter */}
-                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                    <select value={taxYear} onChange={e => setTaxYear(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Years</option>
-                      {taxYears.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                    <select value={taxQuarter} onChange={e => setTaxQuarter(e.target.value)} style={filterSelectSm}>
-                      <option value="all">All Quarters</option>
-                      <option value="1">Q1 — Jan–Mar</option>
-                      <option value="2">Q2 — Apr–Jun</option>
-                      <option value="3">Q3 — Jul–Sep</option>
-                      <option value="4">Q4 — Oct–Dec</option>
-                    </select>
-                    {(taxYear !== "all" || taxQuarter !== "all") && (
-                      <span style={{ fontSize: 12, color: "#3b82f6", alignSelf: "center", fontFamily: "'Courier New', monospace" }}>— {periodLabel}</span>
-                    )}
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-                    <button
-                      onClick={() => {
-                        const expenseRows = Object.entries(filteredTaxSummary).map(([label, amt]) =>
-                          `<tr><td>${label}</td><td style="text-align:right;color:#c0392b">${fmt(amt)}</td></tr>`
-                        ).join("");
-                        const propRows = filteredTaxPropStats.map(p =>
-                          `<tr><td>${p.name}${p.address ? ` — ${p.address}` : ""}</td><td style="text-align:right;color:green">${fmt(p.income)}</td><td style="text-align:right;color:#c0392b">${fmt(p.expenses)}</td><td style="text-align:right;color:${p.net >= 0 ? "green" : "#c0392b"};font-weight:bold">${fmt(p.net)}</td></tr>`
-                        ).join("");
-                        const html = `<html><head><title>${business?.name || "LandlordLedger"} — Tax Report ${periodLabel}</title>
-                          <style>
-                            body{font-family:Georgia,serif;padding:40px;color:#111;max-width:800px;margin:0 auto}
-                            h1{font-size:22px;margin-bottom:4px}
-                            h2{font-size:14px;color:#555;margin-bottom:24px;font-weight:normal}
-                            h3{font-size:15px;margin:28px 0 8px;border-bottom:2px solid #ccc;padding-bottom:6px}
-                            table{width:100%;border-collapse:collapse;margin-bottom:8px}
-                            th{background:#f0f0f0;text-align:left;padding:8px 12px;font-size:13px;border-bottom:2px solid #ccc}
-                            th:not(:first-child){text-align:right}
-                            td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
-                            .total td{font-weight:bold;font-size:15px;border-top:2px solid #ccc;border-bottom:none}
-                            .note{font-size:11px;color:#888;margin-top:4px}
-                          </style>
-                          </head><body>
-                          <h1>${business?.name || "LandlordLedger"} — Tax Report</h1>
-                          <h2>Period: ${periodLabel} &nbsp;·&nbsp; Schedule E Summary &nbsp;·&nbsp; Consult your CPA before filing.</h2>
-                          <h3>Schedule E — Deductible Expenses</h3>
-                          <table>
-                            <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-                            <tbody>${expenseRows || "<tr><td colspan='2' style='color:#888'>No expenses logged.</td></tr>"}</tbody>
-                            <tfoot><tr class="total"><td>Total Deductible Expenses</td><td style="text-align:right;color:#c0392b">${fmt(filteredTaxExpenses)}</td></tr></tfoot>
-                          </table>
-                          <p class="note">* Principal loan payments are not deductible. Only the interest portion qualifies.</p>
-                          <h3>Net P&amp;L by Property</h3>
-                          <table>
-                            <thead><tr><th>Property</th><th style="text-align:right">Gross Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net</th></tr></thead>
-                            <tbody>${propRows || "<tr><td colspan='4' style='color:#888'>No properties found.</td></tr>"}</tbody>
-                          </table>
-                          </body></html>`;
-                        const w = window.open("", "_blank");
-                        w.document.write(html);
-                        w.document.close();
-                        w.print();
-                      }}
-                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                    >
-                      🖨️ Print Tax Report
-                    </button>
-                    <button
-                      onClick={() => {
-                        const header = "Date,Property,Description,Category,Amount,Type\n";
-                        const rows = taxTxs.map(t => {
-                          const prop = properties.find(p => p.id === t.property_id);
-                          return [
-                            t.transaction_date,
-                            `"${(prop?.name || "").replace(/"/g, '""')}"`,
-                            `"${(t.description || "").replace(/"/g, '""')}"`,
-                            `"${(t.category || "").replace(/"/g, '""')}"`,
-                            t.amount,
-                            t.amount >= 0 ? "Income" : "Expense"
-                          ].join(",");
-                        }).join("\n");
-                        const blob = new Blob([header + rows], { type: "text/csv" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `LandlordLedger-Transactions-${periodLabel.replace(/\s/g,"-")}.csv`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }}
-                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                    >
-                      📥 Export CSV
-                    </button>
-                    <button
-                      onClick={() => {
-                        const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'letter' });
-                        doc.setFillColor(15, 17, 23);
-                        doc.rect(0, 0, 216, 28, 'F');
-                        doc.setFontSize(16);
-                        doc.setFont('helvetica', 'bold');
-                        doc.setTextColor(255, 255, 255);
-                        const lw = doc.getTextWidth('Landlord');
-                        doc.text('Landlord', 14, 18);
-                        doc.setTextColor(59, 130, 246);
-                        doc.text('Ledger', 14 + lw, 18);
-                        doc.setTextColor(30, 30, 30);
-                        doc.setFontSize(14);
-                        doc.setFont('helvetica', 'bold');
-                        doc.text(`${business?.name || 'Tax Report'} — Schedule E`, 14, 42);
-                        doc.setFontSize(9);
-                        doc.setFont('helvetica', 'normal');
-                        doc.setTextColor(100, 100, 100);
-                        doc.text(`Period: ${periodLabel}  |  Generated ${new Date().toLocaleDateString()}`, 14, 50);
-                        doc.setDrawColor(59, 130, 246);
-                        doc.setLineWidth(0.4);
-                        doc.line(14, 54, 202, 54);
-                        doc.setFontSize(11);
-                        doc.setFont('helvetica', 'bold');
-                        doc.setTextColor(30, 30, 30);
-                        doc.text('Deductible Expenses', 14, 63);
-                        autoTable(doc, {
-                          startY: 67,
-                          head: [['Category', 'Amount']],
-                          body: Object.entries(filteredTaxSummary).length
-                            ? Object.entries(filteredTaxSummary).map(([label, amt]) => [label, fmt(amt)])
-                            : [['No expenses logged', '']],
-                          foot: [['Total Deductible Expenses', fmt(filteredTaxExpenses)]],
-                          styles: { fontSize: 9, cellPadding: 3 },
-                          headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
-                          footStyles: { fillColor: [239, 246, 255], textColor: [30, 30, 30], fontStyle: 'bold' },
-                          columnStyles: { 1: { halign: 'right' } },
-                          alternateRowStyles: { fillColor: [248, 250, 252] },
-                        });
-                        const noteY = doc.lastAutoTable.finalY + 5;
-                        doc.setFontSize(7);
-                        doc.setFont('helvetica', 'italic');
-                        doc.setTextColor(150, 150, 150);
-                        doc.text('* Principal loan payments are not deductible. Only the interest portion qualifies. Consult your CPA before filing.', 14, noteY, { maxWidth: 188 });
-                        const y2 = noteY + 10;
-                        doc.setFontSize(11);
-                        doc.setFont('helvetica', 'bold');
-                        doc.setTextColor(30, 30, 30);
-                        doc.text('Net P&L by Property', 14, y2);
-                        autoTable(doc, {
-                          startY: y2 + 4,
-                          head: [['Property', 'Gross Income', 'Expenses', 'Net P&L']],
-                          body: filteredTaxPropStats.length
-                            ? filteredTaxPropStats.map(p => [p.name + (p.address ? `\n${p.address}` : ''), fmt(p.income), fmt(p.expenses), fmt(p.net)])
-                            : [['No properties', '', '', '']],
-                          styles: { fontSize: 9, cellPadding: 3 },
-                          headStyles: { fillColor: [30, 34, 53], textColor: 255, fontStyle: 'bold' },
-                          columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
-                          alternateRowStyles: { fillColor: [248, 250, 252] },
-                        });
-                        doc.save(`LandlordLedger-TaxReport-${periodLabel.replace(/\s/g,"-")}.pdf`);
-                      }}
-                      style={{ background: "#1e2235", border: "1px solid #2d3555", color: "#e2e8f0", borderRadius: 10, padding: "10px 16px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}
-                    >
-                      📄 Export PDF
-                    </button>
-                  </div>
-
-                  <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 14, padding: 16, marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 4 }}>SCHEDULE E — DEDUCTIBLE EXPENSES</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>{periodLabel}. Consult your CPA before filing.</div>
-                    {Object.entries(filteredTaxSummary).length === 0
-                      ? <div style={{ fontSize: 14, color: "#94a3b8", padding: "12px 0" }}>No expenses for this period.</div>
-                      : Object.entries(filteredTaxSummary).map(([label, amt]) => (
-                        <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 0", borderBottom: "1px solid #1e2235" }}>
-                          <div style={{ fontSize: 14, color: "#e2e8f0" }}>{label}</div>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: "#f87171" }}>{fmt(amt)}</div>
-                        </div>
-                      ))
-                    }
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 16 }}>
-                      <div style={{ fontSize: 14, color: "#cbd5e1", fontWeight: 600 }}>Total Deductible</div>
-                      <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>{fmt(filteredTaxExpenses)}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 12 }}>NET BY PROPERTY</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {filteredTaxPropStats.map(p => {
-                      const tc = typeColor(p.property_type);
-                      return (
-                        <div key={p.id} style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 12, padding: "16px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                            <div>
-                              <div style={{ fontSize: 14, color: "#e2e8f0", marginBottom: 4 }}>{p.name}</div>
-                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>{p.address}</div>
-                              <span style={{ background: tc.bg, color: tc.text, fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Courier New', monospace" }}>{p.property_type}</span>
-                            </div>
-                            <div style={{ textAlign: "right" }}>
-                              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Net</div>
-                              <div style={{ fontSize: 18, fontWeight: 700, color: p.net >= 0 ? "#4ade80" : "#f87171" }}>
-                                {p.income === 0 && p.expenses === 0 ? "—" : fmt(p.net)}
-                              </div>
-                            </div>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, borderTop: "1px solid #1e2235", paddingTop: 10 }}>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Gross Income</div><div style={{ fontSize: 13, color: "#4ade80" }}>{fmt(p.income)}</div></div>
-                            <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Expenses</div><div style={{ fontSize: 13, color: "#f87171" }}>{fmt(p.expenses)}</div></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
-
-            {/* BILLING */}
-            {activeTab === "billing" && (
-              <>
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 20 }}>SUBSCRIPTION & BILLING</div>
-
-                {subscription.status === "pro" ? (
-                  <div style={{ background: "#0f1117", border: "1px solid #14532d", borderRadius: 16, padding: 28, textAlign: "center" }}>
-                    <div style={{ fontSize: 40, marginBottom: 12 }}>⭐</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80", marginBottom: 8 }}>You're subscribed!</div>
-                    <div style={{ fontSize: 14, color: "#94a3b8" }}>All features unlocked. Thank you for supporting LandlordLedger!</div>
-                  </div>
-                ) : (() => {
-                  const trialEnd = business?.trial_ends_at ? new Date(business.trial_ends_at) : null;
-                  const now = new Date();
-                  const daysLeft = trialEnd ? Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)) : 0;
-                  const inTrial = daysLeft > 0;
-
-                  return (
-                    <>
-                      {/* Trial status banner */}
-                      {inTrial && (
-                        <div style={{ background: daysLeft <= 3 ? "#2d1515" : "#1a2e1a", border: `1px solid ${daysLeft <= 3 ? "#f87171" : "#4ade80"}`, borderRadius: 12, padding: 16, marginBottom: 20, textAlign: "center" }}>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: daysLeft <= 3 ? "#f87171" : "#4ade80", marginBottom: 4 }}>
-                            {daysLeft <= 3 ? `⚠️ Trial ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}!` : `✅ Free trial — ${daysLeft} days remaining`}
-                          </div>
-                          <div style={{ fontSize: 13, color: "#94a3b8" }}>Full access to all features. Subscribe to keep your data after the trial.</div>
-                        </div>
-                      )}
-                      {!inTrial && (
-                        <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 12, padding: 16, marginBottom: 20, textAlign: "center" }}>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: "#f87171", marginBottom: 4 }}>⚠️ Your free trial has ended</div>
-                          <div style={{ fontSize: 13, color: "#94a3b8" }}>Subscribe to continue using LandlordLedger.</div>
-                        </div>
-                      )}
-
-                      {/* Monthly plan */}
-                      <div style={{ background: "#0f1117", border: "1px solid #1e2235", borderRadius: 16, padding: 24, marginBottom: 16 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>Monthly</div>
-                          <div>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "#e2e8f0" }}>$12</span>
-                            <span style={{ fontSize: 13, color: "#94a3b8" }}>/mo</span>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-                          {["Unlimited properties", "Recurring transactions", "Monthly P&L charts", "Tax reports", "Notes", "Cancel anytime"].map(f => (
-                            <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#cbd5e1" }}>
-                              <span style={{ color: "#4ade80" }}>✓</span> {f}
-                            </div>
-                          ))}
-                        </div>
-                        <button onClick={async () => {
-                          const res = await fetch("/api/create-checkout", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "monthly" })
-                          });
-                          const data = await res.json();
-                          if (data.url) window.location.href = data.url;
-                          else alert("Error starting checkout. Try again.");
-                        }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1e2235", color: "#e2e8f0", fontSize: 16, cursor: "pointer", fontWeight: 700, border: "1px solid #2d3555" }}>
-                          Subscribe Monthly →
-                        </button>
-                      </div>
-
-                      {/* Annual plan */}
-                      <div style={{ background: "#0f1117", border: "2px solid #3b82f6", borderRadius: 16, padding: 24, position: "relative" }}>
-                        <div style={{ position: "absolute", top: -12, left: 24, background: "#3b82f6", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 12px", borderRadius: 20, fontFamily: "'Courier New', monospace" }}>BEST VALUE — SAVE $45</div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>Annual</div>
-                          <div>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "#e2e8f0" }}>$99</span>
-                            <span style={{ fontSize: 13, color: "#94a3b8" }}>/year</span>
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 12, color: "#4ade80", marginBottom: 12 }}>Only $8.25/month — 2 months free!</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-                          {["Everything in Monthly", "2 months free", "Priority support", "Early access to new features"].map(f => (
-                            <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#cbd5e1" }}>
-                              <span style={{ color: "#4ade80" }}>✓</span> {f}
-                            </div>
-                          ))}
-                        </div>
-                        <button onClick={async () => {
-                          const res = await fetch("/api/create-checkout", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ user_email: session.user.email, business_id: business.id, plan: "annual" })
-                          });
-                          const data = await res.json();
-                          if (data.url) window.location.href = data.url;
-                          else alert("Error starting checkout. Try again.");
-                        }} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", background: "#1d4ed8", color: "#fff", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
-                          Subscribe Annual →
-                        </button>
-                      </div>
-                    </>
-                  );
-                })()}
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+    </AppContext.Provider>
   );
 }
