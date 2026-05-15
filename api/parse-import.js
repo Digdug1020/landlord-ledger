@@ -91,16 +91,21 @@ Return ONLY a valid JSON array — no markdown, no explanation, no code fences. 
 - "transaction_date": string, YYYY-MM-DD format
 - "description": string, clean payee/merchant name, max 120 chars
 - "amount": number — POSITIVE for income/deposits/credits, NEGATIVE for expenses/charges/debits
-- "type": "income" or "expense"
+- "type": "income", "expense", or "transfer"
 - "category": exactly one of: ${[...CATEGORIES, 'Income / Rent'].map(c => `"${c}"`).join(', ')}
 - "recurring": boolean — true if this looks like a repeating charge (insurance, mortgage, utilities, subscriptions, etc.)
 
 Rules:
 - SKIP header rows, blank rows, total/subtotal rows, balance rows, and any row with no dollar amount
 - If separate Debit and Credit columns exist:
-    * Credit column has a value → type: "income", amount: POSITIVE (e.g. Credit=100.00 → amount: 100)
-    * Debit column has a value → type: "expense", amount: NEGATIVE (e.g. Debit=50.00 → amount: -50)
-    * Never invert this — a Cash App or Venmo credit is income, not an expense
+    * Credit column has a value → amount: POSITIVE (e.g. Credit=100.00 → amount: 100)
+    * Debit column has a value → amount: NEGATIVE (e.g. Debit=50.00 → amount: -50)
+    * Set type based on description context — a Zelle/Cash App/Venmo receipt for rent is "income"; a transfer between your own accounts is "transfer"
+- Use type "transfer" for internal account movements that are NOT real income or spending:
+    * Description contains (case-insensitive): transfer, zelle, cash app, venmo, paypal, ach transfer, wire transfer, mobile deposit, account transfer, between accounts
+    * EXCEPTION: if description also contains a person's name or words like "rent", "deposit from", "payment from" — use "income" instead; it is a legitimate rent payment received
+- Use type "income" for real earnings: rent received, service fees, interest earned, refunds
+- Use type "expense" for real spending: repairs, utilities, insurance, loan payments, purchases
 - Use "Post Date" as the transaction date when present; otherwise use the first date-like column
 - Ignore columns like Status, Balance
 - "Income / Rent" category: use for rent payments, rental income, tenant payments
@@ -196,7 +201,7 @@ ${chunkText}`;
       transaction_date: typeof t.transaction_date === 'string' ? t.transaction_date : new Date().toISOString().slice(0, 10),
       description:      String(t.description || '').slice(0, 120),
       amount:           Number(t.amount) || 0,
-      type:             t.type === 'income' ? 'income' : 'expense',
+      type:             ['income', 'expense', 'transfer'].includes(t.type) ? t.type : 'expense',
       category:         [...CATEGORIES, 'Income / Rent'].includes(t.category) ? t.category : 'Other',
       recurring:        Boolean(t.recurring),
     })).filter(t => t.amount !== 0);

@@ -964,7 +964,8 @@ export default function App() {
                   const rows = data.transactions.map((t, i) => ({
                     ...t,
                     _id: i,
-                    _deleted: false,
+                    _transfer: t.type === "transfer",
+                    _deleted: t.type === "transfer", // transfers unchecked by default
                     property_id: "",
                     isDuplicate: transactions.some(ex =>
                       ex.transaction_date === t.transaction_date &&
@@ -992,8 +993,8 @@ export default function App() {
                     transaction_date: r.transaction_date,
                     description: r.description,
                     category: r.category,
-                    amount: r.type === "expense" ? -Math.abs(r.amount) : Math.abs(r.amount),
-                    type: r.type,
+                    amount: (r.type === "expense" || (r.type === "transfer" && r.amount < 0)) ? -Math.abs(r.amount) : Math.abs(r.amount),
+                    type: r.type === "transfer" ? (r.amount > 0 ? "income" : "expense") : r.type,
                     source: "import",
                     batch_id: batchId,
                   }));
@@ -1019,6 +1020,16 @@ export default function App() {
 
               function updateRow(id, field, value) {
                 setImportRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
+              }
+
+              function includeTransfer(id) {
+                setImportRows(prev => prev.map(r => r._id === id
+                  ? { ...r, _deleted: false, type: r.amount >= 0 ? "income" : "expense" }
+                  : r));
+              }
+
+              function excludeTransfer(id) {
+                setImportRows(prev => prev.map(r => r._id === id ? { ...r, _deleted: true } : r));
               }
 
               // ── Step: done ───────────────────────────────────────────────
@@ -1083,8 +1094,46 @@ export default function App() {
                     <div style={{ background: "#2d1515", border: "1px solid #f87171", borderRadius: 10, padding: 12, marginBottom: 14, color: "#f87171", fontSize: 13 }}>{importError}</div>
                   )}
 
+                  {/* ── Transfer warning section ──────────────────────────── */}
+                  {importRows.some(r => r._transfer) && (() => {
+                    const transferRows = importRows.filter(r => r._transfer);
+                    const includedCount = transferRows.filter(r => !r._deleted).length;
+                    return (
+                      <div style={{ background: "#1c1200", border: "1px solid #d97706", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24", marginBottom: 6 }}>
+                          ⚠️ {transferRows.length} Possible Transfer{transferRows.length !== 1 ? "s" : ""} Detected
+                        </div>
+                        <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.6, marginBottom: 14 }}>
+                          These look like transfers between accounts — not income or expenses. Importing them would inflate your totals. They're excluded by default. Check any that represent real income or spending.
+                          {includedCount > 0 && <span style={{ color: "#d97706" }}> ({includedCount} included — will be saved as income or expense based on amount.)</span>}
+                        </div>
+                        {transferRows.map(row => (
+                          <div key={row._id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid #2a1d00" }}>
+                            <input type="checkbox" checked={!row._deleted}
+                              onChange={e => e.target.checked ? includeTransfer(row._id) : excludeTransfer(row._id)}
+                              style={{ width: 18, height: 18, flexShrink: 0, cursor: "pointer", accentColor: "#d97706" }} />
+                            <div style={{ flex: 1, opacity: row._deleted ? 0.4 : 1 }}>
+                              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{row.description}</div>
+                              <div style={{ fontSize: 11, color: "#92400e" }}>
+                                {row.transaction_date} · <span style={{ color: row.amount >= 0 ? "#4ade80" : "#f87171" }}>{row.amount >= 0 ? "+" : ""}{fmt(row.amount)}</span>
+                              </div>
+                            </div>
+                            {!row._deleted && (
+                              <select value={row.type === "transfer" ? (row.amount >= 0 ? "income" : "expense") : row.type}
+                                onChange={e => updateRow(row._id, "type", e.target.value)}
+                                style={{ ...inputStyle, fontSize: 12, padding: "6px 8px", width: "auto" }}>
+                                <option value="income">Income</option>
+                                <option value="expense">Expense</option>
+                              </select>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-                    {importRows.filter(r => !r._deleted).map(row => (
+                    {importRows.filter(r => !r._deleted && !r._transfer).map(row => (
                       <div key={row._id} style={{ background: "#0f1117", border: `1px solid ${row.isDuplicate ? "#854d0e" : "#1e2235"}`, borderRadius: 12, padding: 14 }}>
                         {row.isDuplicate && (
                           <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>⚠ POSSIBLE DUPLICATE</div>
