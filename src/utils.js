@@ -62,3 +62,26 @@ export const inputStyle = {
   color: '#e2e8f0', borderRadius: 10, padding: '12px 14px',
   fontSize: 16, outline: 'none',
 };
+
+export async function shareApp() {
+  const url = window.location.origin;
+  const payload = {
+    title: 'LandlordLedger',
+    text: 'Property accounting, simplified — track rent, expenses, and taxes in one place.',
+    url,
+  };
+  if (navigator.share) {
+    try {
+      await navigator.share(payload);
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    alert('Link copied to clipboard!');
+  } catch {
+    alert(`Share this link: ${url}`);
+  }
+}

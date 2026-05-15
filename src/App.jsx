@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import Landing from './Landing';
 import { AppContext } from './AppContext';
+import { shareApp } from './utils';
 import LoginScreen from './components/LoginScreen';
 import OnboardingScreen from './components/OnboardingScreen';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
@@ -247,6 +248,9 @@ export default function App() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 12, color: '#94a3b8' }}>{business?.name}</span>
+              <button onClick={shareApp} style={{ background: 'transparent', border: '1px solid #1e2235', borderRadius: 8, padding: '6px 12px', color: '#94a3b8', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" }} title="Share LandlordLedger">
+                📤 Share
+              </button>
               <button onClick={() => supabase.auth.signOut()} style={{ background: 'transparent', border: '1px solid #1e2235', borderRadius: 8, padding: '6px 12px', color: '#94a3b8', cursor: 'pointer', fontSize: 12, fontFamily: "'Courier New', monospace" }}>
                 Sign out
               </button>

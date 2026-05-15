@@ -1,5 +1,6 @@
 import React from "react";
 import { supabase } from "./supabaseClient";
+import { shareApp } from "./utils";
 
 const features = [
   {
@@ -81,16 +82,29 @@ export default function Landing({ onGetStarted }) {
         <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "Georgia, serif" }}>
           Landlord<span style={{ color: "#3b82f6" }}>Ledger</span>
         </div>
-        <button
-          onClick={handleGetStarted}
-          style={{
-            background: "#3b82f6", color: "#fff", border: "none",
-            borderRadius: 10, padding: "10px 22px", fontSize: 15,
-            fontWeight: 600, cursor: "pointer",
-          }}
-        >
-          Sign In
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={shareApp}
+            style={{
+              background: "transparent", color: "#cbd5e1",
+              border: "1px solid #2d3555",
+              borderRadius: 10, padding: "10px 16px", fontSize: 14,
+              fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            📤 Share
+          </button>
+          <button
+            onClick={handleGetStarted}
+            style={{
+              background: "#3b82f6", color: "#fff", border: "none",
+              borderRadius: 10, padding: "10px 22px", fontSize: 15,
+              fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Sign In
+          </button>
+        </div>
       </nav>
 
       {/* Hero */}
@@ -213,6 +227,47 @@ export default function Landing({ onGetStarted }) {
                 <div style={{ fontSize: 11, color: "#64748b" }}>{item.category}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Install on phone */}
+      <section style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px" }}>
+        <div style={{
+          background: "#0f1117", border: "1px solid #1e2235",
+          borderRadius: 20, padding: "40px 32px", textAlign: "center",
+        }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
+          <h2 style={{ fontSize: 26, fontWeight: 800, color: "#f1f5f9", marginBottom: 12 }}>
+            Install on your phone
+          </h2>
+          <p style={{
+            color: "#94a3b8", fontSize: 15, lineHeight: 1.6,
+            maxWidth: 480, margin: "0 auto 32px",
+          }}>
+            LandlordLedger works as a Progressive Web App — add it to your home screen for one-tap access. No app store, no download.
+          </p>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 16, textAlign: "left",
+          }}>
+            <div style={{ background: "#0d1420", border: "1px solid #1e2d45", borderRadius: 12, padding: "20px 22px" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#3b82f6", marginBottom: 10, letterSpacing: "0.04em" }}>📱 IPHONE</div>
+              <ol style={{ margin: 0, paddingLeft: 18, color: "#cbd5e1", fontSize: 14, lineHeight: 1.8 }}>
+                <li>Open this page in <strong>Safari</strong></li>
+                <li>Tap the <strong>Share</strong> icon</li>
+                <li>Choose <strong>Add to Home Screen</strong></li>
+              </ol>
+            </div>
+            <div style={{ background: "#0d1420", border: "1px solid #1e2d45", borderRadius: 12, padding: "20px 22px" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#3b82f6", marginBottom: 10, letterSpacing: "0.04em" }}>🤖 ANDROID</div>
+              <ol style={{ margin: 0, paddingLeft: 18, color: "#cbd5e1", fontSize: 14, lineHeight: 1.8 }}>
+                <li>Open this page in <strong>Chrome</strong></li>
+                <li>Tap the <strong>menu</strong> (⋮)</li>
+                <li>Choose <strong>Add to Home Screen</strong></li>
+              </ol>
+            </div>
           </div>
         </div>
       </section>
