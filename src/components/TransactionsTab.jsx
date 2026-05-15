@@ -13,6 +13,8 @@ export default function TransactionsTab() {
   const [txFilterType, setTxFilterType] = useState('all');
   const [txFilterCat, setTxFilterCat] = useState('all');
   const [showImportBatches, setShowImportBatches] = useState(false);
+  const [editingTxId, setEditingTxId] = useState(null);
+  const [editForm, setEditForm] = useState({ property_id: '', transaction_date: '', description: '', category: '', amount: '', type: 'income' });
 
   const displayTxs = useMemo(() => {
     let rows = filterProp === 'all' ? [...transactions] : transactions.filter(t => t.property_id === filterProp);
@@ -29,6 +31,33 @@ export default function TransactionsTab() {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (!error) setTransactions(prev => prev.filter(t => t.id !== id));
     else alert('Error deleting.');
+  }
+
+  function startEdit(tx) {
+    setEditingTxId(tx.id);
+    setEditForm({
+      property_id: tx.property_id || 'all',
+      transaction_date: tx.transaction_date,
+      description: tx.description || '',
+      category: tx.category || '',
+      amount: Math.abs(tx.amount),
+      type: tx.amount >= 0 ? 'income' : 'expense',
+    });
+  }
+
+  async function saveEdit(originalTx) {
+    const amount = parseFloat(editForm.amount) * (editForm.type === 'expense' ? -1 : 1);
+    const { data, error } = await supabase.from('transactions').update({
+      property_id: editForm.property_id === 'all' ? null : editForm.property_id,
+      transaction_date: editForm.transaction_date,
+      description: editForm.description,
+      category: editForm.category || null,
+      amount,
+      type: editForm.type,
+    }).eq('id', originalTx.id).select().single();
+    if (error) { alert('Error saving: ' + error.message); return; }
+    setTransactions(prev => prev.map(t => t.id === originalTx.id ? data : t));
+    setEditingTxId(null);
   }
 
   async function submitManual(e) {
@@ -167,6 +196,37 @@ export default function TransactionsTab() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {displayTxs.map(tx => {
+          if (editingTxId === tx.id) {
+            return (
+              <form key={tx.id} onSubmit={e => { e.preventDefault(); saveEdit(tx); }}
+                style={{ background: '#0f1117', border: '1px solid #3b82f6', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 11, color: '#3b82f6', fontFamily: "'Courier New', monospace", letterSpacing: 1, marginBottom: 4 }}>EDITING TRANSACTION</div>
+                <select value={editForm.property_id} onChange={e => setEditForm(v => ({ ...v, property_id: e.target.value }))} style={inputStyle}>
+                  <option value="all">All Properties (shared expense)</option>
+                  {properties.map(p => <option key={p.id} value={p.id}>{p.name} — {p.address}</option>)}
+                </select>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <input type="date" value={editForm.transaction_date} onChange={e => setEditForm(v => ({ ...v, transaction_date: e.target.value }))} required style={inputStyle} />
+                  <select value={editForm.type} onChange={e => setEditForm(v => ({ ...v, type: e.target.value }))} style={inputStyle}>
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                </div>
+                <input placeholder="Description" value={editForm.description} onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} required style={inputStyle} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <select value={editForm.category} onChange={e => setEditForm(v => ({ ...v, category: e.target.value }))} style={inputStyle}>
+                    <option value="">Income / Rent</option>
+                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                  <input type="number" placeholder="Amount" value={editForm.amount} onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} required style={inputStyle} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button type="submit" style={{ background: '#1d4ed8', border: 'none', borderRadius: 10, color: '#fff', cursor: 'pointer', fontSize: 15, padding: '12px 0', fontWeight: 600 }}>Save Changes</button>
+                  <button type="button" onClick={() => setEditingTxId(null)} style={{ background: '#1e2235', border: 'none', borderRadius: 10, color: '#94a3b8', cursor: 'pointer', fontSize: 15, padding: '12px 0' }}>Cancel</button>
+                </div>
+              </form>
+            );
+          }
           const isSelected = selectedTxIds.includes(tx.id);
           return (
             <div key={tx.id} onClick={() => setSelectedTxIds(prev => isSelected ? prev.filter(id => id !== tx.id) : [...prev, tx.id])}
@@ -180,6 +240,7 @@ export default function TransactionsTab() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ fontSize: 17, fontWeight: 700, color: tx.amount >= 0 ? '#4ade80' : '#f87171', whiteSpace: 'nowrap' }}>{fmt(tx.amount)}</div>
+                  <button onClick={e => { e.stopPropagation(); startEdit(tx); }} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Edit">✏️</button>
                   <button onClick={e => { e.stopPropagation(); deleteTransaction(tx.id); }} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: '0 4px' }} title="Delete">✕</button>
                 </div>
               </div>
