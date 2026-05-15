@@ -1123,6 +1123,7 @@ export default function App() {
                         day_of_month: dom,
                         next_due_date: next.toISOString().slice(0, 10),
                         active: true,
+                        batch_id: batchId,
                       };
                     });
                   const { error: rErr } = await supabase.from("recurring_transactions").insert(recurringTemplates);
@@ -1268,19 +1269,19 @@ export default function App() {
                         {row.isDuplicate && (
                           <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "'Courier New', monospace", marginBottom: 8 }}>⚠ POSSIBLE DUPLICATE</div>
                         )}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, padding: "8px 10px", borderRadius: 8, background: row.recurring ? "#1a1535" : "#0f1117", border: `1px solid ${row.recurring ? "#7c3aed" : "#1e2235"}` }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1 }}>
                             <input type="checkbox" checked={!!row.recurring}
                               onChange={e => updateRow(row._id, "recurring", e.target.checked)}
-                              style={{ accentColor: "#818cf8", cursor: "pointer", width: 14, height: 14 }} />
-                            <span style={{ fontSize: 11, color: row.recurring ? "#818cf8" : "#475569", fontFamily: "'Courier New', monospace" }}>
-                              RECURRING{row.recurring ? " — adds to schedule" : ""}
+                              style={{ accentColor: "#a78bfa", cursor: "pointer", width: 17, height: 17, flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, fontWeight: row.recurring ? 600 : 400, color: row.recurring ? "#c4b5fd" : "#64748b" }}>
+                              ↻ Recurring{row.recurring ? " — will add to schedule" : ""}
                             </span>
                           </label>
                           {row.recurring && (
                             <select value={row.guessedFrequency || "monthly"}
                               onChange={e => updateRow(row._id, "guessedFrequency", e.target.value)}
-                              style={{ ...inputStyle, fontSize: 11, padding: "3px 7px", width: "auto" }}>
+                              style={{ ...inputStyle, fontSize: 12, padding: "4px 8px", width: "auto", flexShrink: 0 }}>
                               <option value="monthly">Monthly</option>
                               <option value="weekly">Weekly</option>
                               <option value="yearly">Yearly</option>
@@ -1620,6 +1621,23 @@ export default function App() {
                       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10, fontFamily: "'Courier New', monospace" }}>
                         {r.frequency} · next: {r.next_due_date}{r.end_date ? ` · ends: ${r.end_date}` : ""}
                       </div>
+                      {r.batch_id && (() => {
+                        const batch = importBatches.find(b => b.id === r.batch_id);
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "6px 10px", background: "#1c1200", border: "1px solid #3d2e00", borderRadius: 8 }}>
+                            <span style={{ fontSize: 11, color: "#92400e" }}>
+                              📥 Imported {batch ? new Date(batch.importedAt).toLocaleDateString() : "from file"}
+                            </span>
+                            <button onClick={async () => {
+                              if (!window.confirm(`Remove all recurring schedules from this import batch?`)) return;
+                              const { error } = await supabase.from("recurring_transactions").delete().eq("batch_id", r.batch_id);
+                              if (!error) setRecurring(prev => prev.filter(x => x.batch_id !== r.batch_id));
+                            }} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: "0 4px" }}>
+                              ✕ Delete batch
+                            </button>
+                          </div>
+                        );
+                      })()}
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => { setEditingRecurring(r); setRecurringForm({ property_id: r.property_id || "all", description: r.description, amount: Math.abs(r.amount), type: r.type, category: r.category || "", frequency: r.frequency, day_of_month: r.day_of_month, next_due_date: r.next_due_date, end_date: r.end_date || "" }); setShowRecurringForm(true); }}
                           style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
