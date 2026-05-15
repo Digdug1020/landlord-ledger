@@ -1820,10 +1820,15 @@ export default function App() {
                         <button onClick={() => { setEditingRecurring(r); setRecurringForm({ property_id: r.property_id || "all", description: r.description, amount: Math.abs(r.amount), type: r.type, category: r.category || "", frequency: r.frequency, day_of_month: r.day_of_month, next_due_date: r.next_due_date, end_date: r.end_date || "" }); setShowRecurringForm(true); }}
                           style={{ background: "#1e2235", border: "1px solid #2d3555", borderRadius: 8, padding: "6px 14px", color: "#94a3b8", cursor: "pointer", fontSize: 12 }}>Edit</button>
                         <button onClick={async () => {
-                          if (!window.confirm("Stop this recurring transaction?")) return;
+                          if (!window.confirm("Stop this recurring transaction? It will no longer generate future entries.")) return;
                           await supabase.from("recurring_transactions").update({ active: false }).eq("id", r.id);
                           setRecurring(prev => prev.filter(x => x.id !== r.id));
                         }} style={{ background: "#1e2235", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 14px", color: "#f87171", cursor: "pointer", fontSize: 12 }}>Stop</button>
+                        <button onClick={async () => {
+                          if (!window.confirm(`Delete "${r.description}" permanently? This cannot be undone.`)) return;
+                          const { error } = await supabase.from("recurring_transactions").delete().eq("id", r.id);
+                          if (!error) setRecurring(prev => prev.filter(x => x.id !== r.id));
+                        }} style={{ background: "#2d0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: "6px 10px", color: "#f87171", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>✕</button>
                       </div>
                     </div>
                   ))}
