@@ -26,10 +26,53 @@ module.exports = async function handler(req, res) {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Keep header row to prepend to every chunk so Claude knows column names
-  const allLines  = text.split('\n').filter(l => l.trim().length > 0);
-  const header    = allLines[0] || '';
-  const dataLines = allLines.slice(1);
+  // ── Sensitive data scrubbing ───────────────────────────────────────────────
+  // Column names that should never be sent to an external AI service
+  const SENSITIVE_COL_RE = /^(account[\s_-]?(number|num|no|#)?|check[\s_-]?(number|num|no|#)?|card[\s_-]?(number|num|no|#)?|routing[\s_-]?(number|num|no|#)?|aba|ssn|social[\s_-]?security)$/i;
+
+  // Card/account number patterns in free text: "xxxx-xxxx-xxxx-xxxx" or
+  // bare 13-19 digit sequences (avoids matching short amounts/dates)
+  const INLINE_ACCT_RE = /\b\d{4}[\s-]\d{4}[\s-]\d{4}[\s-]\d{4,7}\b|\b\d{13,19}\b/g;
+
+  // Minimal CSV field splitter (respects double-quoted fields)
+  function splitCSV(line) {
+    const fields = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { fields.push(cur); cur = ''; }
+      else { cur += ch; }
+    }
+    fields.push(cur);
+    return fields;
+  }
+
+  function scrubLines(rawLines) {
+    if (rawLines.length === 0) return { header: '', lines: [] };
+
+    const headerFields = splitCSV(rawLines[0]);
+    // Find which column indices are sensitive
+    const dropIndices = new Set(
+      headerFields.map((f, i) => SENSITIVE_COL_RE.test(f.trim()) ? i : -1).filter(i => i >= 0)
+    );
+
+    function filterFields(fields) {
+      return fields.filter((_, i) => !dropIndices.has(i)).join(',');
+    }
+
+    const cleanHeader = filterFields(headerFields);
+    const cleanLines  = rawLines.slice(1).map(line => {
+      const filtered = filterFields(splitCSV(line));
+      // Belt-and-suspenders: redact inline account/card number patterns
+      return filtered.replace(INLINE_ACCT_RE, '[REDACTED]');
+    });
+
+    return { header: cleanHeader, lines: cleanLines };
+  }
+  // ── End scrubbing ──────────────────────────────────────────────────────────
+
+  const rawLines          = text.split('\n').filter(l => l.trim().length > 0);
+  const { header, lines: dataLines } = scrubLines(rawLines);
 
   // Split data rows into CHUNK_SIZE chunks
   const chunks = [];
