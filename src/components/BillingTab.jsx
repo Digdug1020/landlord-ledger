@@ -91,6 +91,12 @@ export default function BillingTab() {
           </div>
         </>
       )}
+
+      <div style={{ marginTop: 32, paddingTop: 20, borderTop: '1px solid #1e2235', textAlign: 'center' }}>
+        <a href="/delete-account" style={{ fontSize: 13, color: '#475569', textDecoration: 'none' }}>
+          Want to delete your account? →
+        </a>
+      </div>
     </>
   );
 }

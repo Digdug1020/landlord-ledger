@@ -396,6 +396,7 @@ export default function Landing({ onGetStarted }) {
         <div style={{ fontSize: 13, color: "#475569", display: "flex", gap: 20 }}>
           <a href="/terms.html" style={{ color: "#475569", textDecoration: "none" }}>Terms</a>
           <a href="/privacy.html" style={{ color: "#475569", textDecoration: "none" }}>Privacy</a>
+          <a href="/delete-account" style={{ color: "#475569", textDecoration: "none" }}>Delete Account</a>
         </div>
         <div style={{ fontSize: 13, color: "#334155" }}>
           © {new Date().getFullYear()} LandlordLedger
