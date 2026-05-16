@@ -5,8 +5,10 @@ import { PROPERTY_TYPES } from '../utils';
 export default function OnboardingScreen({ session, onComplete }) {
   const [step, setStep] = useState(1);
   const [businessName, setBusinessName] = useState('');
+  const [businessId, setBusinessId] = useState(null);
   const [propForm, setPropForm] = useState({ name: '', address: '', property_type: 'Residential', note: '' });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box',
@@ -18,21 +20,65 @@ export default function OnboardingScreen({ session, onComplete }) {
   async function createBusiness() {
     if (!businessName.trim()) return;
     setLoading(true);
-    const { error } = await supabase.from('businesses').insert([{ name: businessName, owner_id: session.user.id }]).select().single();
-    if (error) { alert('Error creating business.'); setLoading(false); return; }
+    setError('');
+
+    // Handle back-and-resubmit: reuse the existing business if one is already in flight
+    const { data: existing } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', session.user.id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      setBusinessId(existing.id);
+      setLoading(false);
+      setStep(2);
+      return;
+    }
+
+    const { data, error: insertErr } = await supabase
+      .from('businesses')
+      .insert([{ name: businessName, owner_id: session.user.id }])
+      .select()
+      .single();
+
+    if (insertErr || !data) {
+      setError('Could not create business: ' + (insertErr?.message || 'no row returned'));
+      setLoading(false);
+      return;
+    }
+
+    setBusinessId(data.id);
     setLoading(false);
     setStep(2);
   }
 
   async function addFirstProperty() {
     if (!propForm.name.trim()) return;
+    if (!businessId) {
+      setError('Business ID missing — please go back and re-enter your business name.');
+      return;
+    }
     setLoading(true);
-    const { data: biz } = await supabase.from('businesses').select('id').eq('owner_id', session.user.id).single();
-    if (!biz) { alert('Business not found.'); setLoading(false); return; }
-    await supabase.from('properties').insert([{
-      business_id: biz.id, name: propForm.name, address: propForm.address,
-      property_type: propForm.property_type, note: propForm.note, archived: false,
+    setError('');
+
+    const { error: propErr } = await supabase.from('properties').insert([{
+      business_id: businessId,
+      name: propForm.name,
+      address: propForm.address,
+      property_type: propForm.property_type,
+      note: propForm.note,
+      archived: false,
     }]);
+
+    if (propErr) {
+      setError('Could not save property: ' + propErr.message);
+      setLoading(false);
+      return;
+    }
+
     setLoading(false);
     onComplete();
   }
@@ -76,6 +122,11 @@ export default function OnboardingScreen({ session, onComplete }) {
                 }}>{loading ? 'Saving...' : 'Launch App →'}</button>
               </div>
             </>
+          )}
+          {error && (
+            <div style={{ marginTop: 14, padding: '10px 12px', background: '#2d1515', border: '1px solid #7f1d1d', borderRadius: 8, color: '#f87171', fontSize: 13, lineHeight: 1.5 }}>
+              {error}
+            </div>
           )}
         </div>
       </div>
