@@ -32,6 +32,25 @@ export default function DashboardTab() {
     return { ...prop, income: inc, expenses: exp, net: inc - exp, txCount: txs.length };
   });
 
+  // Surface "All Properties" / null-property transactions as a synthetic card
+  // so users can see where shared income & expenses landed (without it the
+  // top totals would include them but the per-property breakdown would not).
+  const sharedTxs = dashTxs.filter(t => !t.property_id);
+  if (sharedTxs.length > 0) {
+    const inc = sharedTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const exp = sharedTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    filteredPropStats.push({
+      id: '__shared__',
+      name: 'Shared / All Properties',
+      address: 'Transactions not tied to a specific property',
+      property_type: 'Shared',
+      income: inc,
+      expenses: exp,
+      net: inc - exp,
+      txCount: sharedTxs.length,
+    });
+  }
+
   const periodLabel = dashYear === 'all' ? 'ALL TIME' : dashQuarter === 'all' ? dashYear : `Q${dashQuarter} ${dashYear}`;
   const filterSelectSm = { background: '#1e2235', border: '1px solid #2d3555', color: '#e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12, outline: 'none' };
 

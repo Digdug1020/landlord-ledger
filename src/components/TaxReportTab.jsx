@@ -36,6 +36,24 @@ export default function TaxReportTab() {
     return { ...prop, income: inc, expenses: exp, net: inc - exp };
   });
 
+  // Surface null-property ("All Properties") transactions so the per-property
+  // breakdown reconciles to the totals above. Appears in UI cards, print HTML,
+  // and PDF/CSV exports automatically since they all iterate this array.
+  const sharedTaxTxs = taxTxs.filter(t => !t.property_id);
+  if (sharedTaxTxs.length > 0) {
+    const inc = sharedTaxTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const exp = sharedTaxTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    filteredTaxPropStats.push({
+      id: '__shared__',
+      name: 'Shared / All Properties',
+      address: 'Not tied to a specific property',
+      property_type: 'Shared',
+      income: inc,
+      expenses: exp,
+      net: inc - exp,
+    });
+  }
+
   const periodLabel = taxYear === 'all' ? 'All Time' : taxQuarter === 'all' ? taxYear : `Q${taxQuarter} ${taxYear}`;
   const filterSelectSm = { background: '#1e2235', border: '1px solid #2d3555', color: '#e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12, outline: 'none' };
 
